@@ -1,0 +1,180 @@
+version: '3.8'
+
+# IT-Outsource Management System - Production Environment
+# Продакшн-конфигурация с SSL, безопасностью и мониторингом
+
+services:
+  # Nginx Proxy Manager - управление SSL и доменами
+  nginx-proxy:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: ito-nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"  # Admin panel
+    volumes:
+      - nginx_data:/data
+      - nginx_letsencrypt:/etc/letsencrypt
+    networks:
+      - ito-network
+
+  # PostgreSQL - основная база данных
+  postgres:
+    image: postgres:15
+    container_name: ito-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ito_main
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backup/postgres:/backup
+    networks:
+      - ito-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis - кеширование и очереди  
+  redis:
+    image: redis:7-alpine
+    container_name: ito-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ito-network
+
+  # NetBox - документирование инфраструктуры
+  netbox:
+    image: netboxcommunity/netbox:latest
+    container_name: ito-netbox
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      SKIP_SUPERUSER: "false"
+      SUPERUSER_EMAIL: ${NETBOX_ADMIN_EMAIL}
+      SUPERUSER_PASSWORD: ${NETBOX_ADMIN_PASSWORD}
+      SECRET_KEY: ${NETBOX_SECRET_KEY}
+      DB_NAME: netbox
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - netbox_media:/opt/netbox/netbox/media
+      - ./configs/netbox:/etc/netbox/config:ro
+    networks:
+      - ito-network
+
+  # Vaultwarden - менеджер паролей
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: ito-vaultwarden
+    restart: unless-stopped
+    environment:
+      WEBSOCKET_ENABLED: "true"
+      ADMIN_TOKEN: ${VAULTWARDEN_ADMIN_TOKEN}
+      SIGNUPS_ALLOWED: "false"
+      INVITATIONS_ALLOWED: "true"
+      DOMAIN: https://${VAULTWARDEN_DOMAIN}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_FROM_NAME: "IT-Outsource Vaultwarden"
+      SMTP_SECURITY: "starttls"
+      SMTP_PORT: 587
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - vaultwarden_data:/data
+      - ./backup/vaultwarden:/backup
+    networks:
+      - ito-network
+
+  # BookStack - база знаний
+  bookstack:
+    image: lscr.io/linuxserver/bookstack:latest
+    container_name: ito-bookstack
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      APP_URL: https://${BOOKSTACK_DOMAIN}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER}
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_DATABASE: bookstack
+      MAIL_DRIVER: smtp
+      MAIL_HOST: ${SMTP_HOST}
+      MAIL_PORT: 587
+      MAIL_USERNAME: ${SMTP_USERNAME}
+      MAIL_PASSWORD: ${SMTP_PASSWORD}
+      MAIL_ENCRYPTION: tls
+      MAIL_FROM_ADDRESS: ${SMTP_FROM}
+    volumes:
+      - bookstack_config:/config
+      - ./backup/bookstack:/backup
+    depends_on:
+      - postgres
+    networks:
+      - ito-network
+
+  # Telegram Bot API Server (самохостинг)
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: ito-telegram-api
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+    volumes:
+      - telegram_api_data:/tmp
+    networks:
+      - ito-network
+
+  # Наш Telegram Bot
+  telegram-bot:
+    build: ./telegram-bot
+    container_name: ito-telegram-bot
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - telegram-bot-api
+    environment:
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/telegram_bot
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+      NETBOX_URL: http://netbox:8080
+      NETBOX_TOKEN: ${NETBOX_API_TOKEN}
+      VAULTWARDEN_URL: http://vaultwarden
+      BOOKSTACK_URL: http://bookstack
+      BOOKSTACK_TOKEN: ${BOOKSTACK_API_TOKEN}
+    volumes:
+      - ./telegram-bot:/app
+      - ./logs:/app/logs
+    networks:
+      - ito-network
+
+volumes:
+  nginx_data:
+  nginx_letsencrypt:
+  postgres_data:
+  redis_data:
+  netbox_media:
+  vaultwarden_data:
+  bookstack_config:
+  telegram_api_data:
+
+networks:
+  ito-network:
+    driver: bridge

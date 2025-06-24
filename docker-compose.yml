@@ -1,0 +1,99 @@
+version: '3.8'
+
+# IT-Outsource Management System - Development Environment
+# Локальная среда разработки для всех компонентов системы
+
+services:
+  # PostgreSQL - основная база данных
+  postgres:
+    image: postgres:15
+    container_name: ito-postgres
+    environment:
+      POSTGRES_DB: ito_main
+      POSTGRES_USER: ito_user
+      POSTGRES_PASSWORD: ito_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - ito-network
+
+  # Redis - кеширование и очереди
+  redis:
+    image: redis:7-alpine
+    container_name: ito-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ito-network
+
+  # NetBox - документирование инфраструктуры
+  netbox:
+    image: netboxcommunity/netbox:latest
+    container_name: ito-netbox
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      SKIP_SUPERUSER: "false"
+      SUPERUSER_EMAIL: admin@example.com
+      SUPERUSER_PASSWORD: admin123
+    ports:
+      - "8000:8080"
+    volumes:
+      - netbox_media:/opt/netbox/netbox/media
+      - ./configs/netbox:/etc/netbox/config:ro
+    networks:
+      - ito-network
+
+  # Vaultwarden - менеджер паролей
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: ito-vaultwarden
+    environment:
+      WEBSOCKET_ENABLED: "true"
+      ADMIN_TOKEN: admin_token_here
+    ports:
+      - "8080:80"
+      - "3012:3012"
+    volumes:
+      - vaultwarden_data:/data
+    networks:
+      - ito-network
+
+  # BookStack - база знаний
+  bookstack:
+    image: lscr.io/linuxserver/bookstack:latest
+    container_name: ito-bookstack
+    environment:
+      PUID: 1000
+      PGID: 1000
+      APP_URL: http://localhost:8081
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ito_user
+      DB_PASS: ito_dev_password
+      DB_DATABASE: bookstack
+    ports:
+      - "8081:80"
+    volumes:
+      - bookstack_config:/config
+    depends_on:
+      - postgres
+    networks:
+      - ito-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  netbox_media:
+  vaultwarden_data:
+  bookstack_config:
+
+networks:
+  ito-network:
+    driver: bridge
