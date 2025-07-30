@@ -1,0 +1,421 @@
+"""
+Обработчики команд поиска в NetBox
+"""
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CommandObject
+from typing import List, Dict, Any
+
+from ..services.netbox_service import NetBoxService
+from ..utils.formatters import (
+    format_device_info, format_site_info, format_search_results, 
+    format_error_message, escape_markdown
+)
+from ..utils.logger import bot_logger, log_user_action
+
+router = Router()
+netbox_service = NetBoxService()
+
+
+def create_devices_keyboard(devices: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """Создание клавиатуры с устройствами"""
+    keyboard = []
+    for device in devices[:10]:  # Максимум 10 устройств
+        device_name = device.get('name', f"Device {device.get('id', 'N/A')}")
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"🖥️ {device_name}",
+                callback_data=f"device:{device.get('id')}"
+            )
+        ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def create_sites_keyboard(sites: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """Создание клавиатуры с сайтами"""
+    keyboard = []
+    for site in sites[:10]:  # Максимум 10 сайтов
+        site_name = site.get('name', f"Site {site.get('id', 'N/A')}")
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"🏢 {site_name}",
+                callback_data=f"site:{site.get('id')}"
+            )
+        ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+@router.message(Command("search"))
+async def search_command(message: Message, command: CommandObject):
+    """Обработчик команды /search"""
+    user_id = message.from_user.id
+    
+    try:
+        # Проверяем наличие запроса
+        if not command.args:
+            await message.answer(
+                "🔍 Использование: `/search <запрос>`\n\n"
+                "Примеры:\n"
+                "• `/search server` \\- поиск серверов\n" 
+                "• `/search switch` \\- поиск коммутаторов\n"
+                "• `/search core` \\- поиск по названию",
+                parse_mode="MarkdownV2"
+            )
+            return
+        
+        query = command.args.strip()
+        
+        # Логируем действие пользователя
+        log_user_action(user_id, "search", {"query": query})
+        
+        # Отправляем сообщение о поиске
+        search_msg = await message.answer(
+            f"🔍 Поиск по запросу: *{escape_markdown(query)}*\\.\\.\\.",
+            parse_mode="MarkdownV2"
+        )
+        
+        # Выполняем поиск
+        results = await netbox_service.search_global(query, user_id=user_id)
+        
+        # Проверяем результаты
+        total_found = sum(len(items) for items in results.values())
+        
+        if total_found == 0:
+            await search_msg.edit_text(
+                f"🔍 По запросу *{escape_markdown(query)}* ничего не найдено\\.",
+                parse_mode="MarkdownV2"
+            )
+            return
+        
+        # Форматируем результаты
+        formatted_results = format_search_results(results, query)
+        
+        # Создаем клавиатуру с результатами
+        keyboard = []
+        
+        # Добавляем устройства
+        devices = results.get('devices', [])
+        if devices:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🖥️ Устройства ({len(devices)})",
+                    callback_data=f"show_devices:{query}"
+                )
+            ])
+        
+        # Добавляем сайты
+        sites = results.get('sites', [])
+        if sites:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🏢 Сайты ({len(sites)})",
+                    callback_data=f"show_sites:{query}"
+                )
+            ])
+        
+        # Добавляем IP адреса
+        ip_addresses = results.get('ip_addresses', [])
+        if ip_addresses:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🌐 IP адреса ({len(ip_addresses)})",
+                    callback_data=f"show_ips:{query}"
+                )
+            ])
+        
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+        
+        await search_msg.edit_text(
+            formatted_results,
+            parse_mode="MarkdownV2",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        bot_logger.error(f"Search command error: {e}")
+        await message.answer(
+            format_error_message("api_error", str(e)),
+            parse_mode="MarkdownV2"
+        )
+
+
+@router.callback_query(F.data.startswith("show_devices:"))
+async def show_devices_callback(callback: CallbackQuery):
+    """Показать список устройств"""
+    try:
+        query = callback.data.split(":", 1)[1]
+        user_id = callback.from_user.id
+        
+        # Получаем устройства
+        devices_result = await netbox_service.get_devices(
+            search=query, 
+            limit=20, 
+            user_id=user_id
+        )
+        
+        devices = devices_result.get('results', [])
+        
+        if not devices:
+            await callback.answer("Устройства не найдены", show_alert=True)
+            return
+        
+        keyboard = create_devices_keyboard(devices)
+        
+        message_text = f"🖥️ *Найденные устройства по запросу:* {escape_markdown(query)}\n\n"
+        message_text += "Выберите устройство для просмотра подробной информации:"
+        
+        await callback.message.edit_text(
+            message_text,
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard
+        )
+        
+        await callback.answer()
+        
+    except Exception as e:
+        bot_logger.error(f"Show devices callback error: {e}")
+        await callback.answer("Ошибка при получении устройств", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("show_sites:"))
+async def show_sites_callback(callback: CallbackQuery):
+    """Показать список сайтов"""
+    try:
+        query = callback.data.split(":", 1)[1]
+        user_id = callback.from_user.id
+        
+        # Получаем сайты
+        sites_result = await netbox_service.get_sites(
+            search=query,
+            limit=20,
+            user_id=user_id
+        )
+        
+        sites = sites_result.get('results', [])
+        
+        if not sites:
+            await callback.answer("Сайты не найдены", show_alert=True)
+            return
+        
+        keyboard = create_sites_keyboard(sites)
+        
+        message_text = f"🏢 *Найденные сайты по запросу:* {escape_markdown(query)}\n\n"
+        message_text += "Выберите сайт для просмотра подробной информации:"
+        
+        await callback.message.edit_text(
+            message_text,
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard
+        )
+        
+        await callback.answer()
+        
+    except Exception as e:
+        bot_logger.error(f"Show sites callback error: {e}")
+        await callback.answer("Ошибка при получении сайтов", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("device:"))
+async def device_info_callback(callback: CallbackQuery):
+    """Показать информацию об устройстве"""
+    try:
+        device_id = int(callback.data.split(":", 1)[1])
+        user_id = callback.from_user.id
+        
+        log_user_action(user_id, "view_device", {"device_id": device_id})
+        
+        # Получаем информацию об устройстве
+        device = await netbox_service.get_device_by_id(device_id, user_id=user_id)
+        
+        # Форматируем информацию
+        device_info = format_device_info(device)
+        
+        # Создаем клавиатуру с дополнительными действиями
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="🔌 Интерфейсы",
+                    callback_data=f"interfaces:{device_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🌐 NetBox",
+                    url=device.get('display_url', '')
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад к поиску",
+                    callback_data="back_to_search"
+                )
+            ]
+        ]
+        
+        await callback.message.edit_text(
+            device_info,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        
+        await callback.answer()
+        
+    except ValueError:
+        await callback.answer("Неверный ID устройства", show_alert=True)
+    except Exception as e:
+        bot_logger.error(f"Device info callback error: {e}")
+        await callback.answer("Ошибка при получении информации об устройстве", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("site:"))
+async def site_info_callback(callback: CallbackQuery):
+    """Показать информацию о сайте"""
+    try:
+        site_id = int(callback.data.split(":", 1)[1])
+        user_id = callback.from_user.id
+        
+        log_user_action(user_id, "view_site", {"site_id": site_id})
+        
+        # Получаем информацию о сайте
+        site = await netbox_service.get_site_by_id(site_id, user_id=user_id)
+        
+        # Форматируем информацию
+        site_info = format_site_info(site)
+        
+        # Создаем клавиатуру с дополнительными действиями
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="🖥️ Устройства сайта",
+                    callback_data=f"site_devices:{site_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🏗️ Стойки",
+                    callback_data=f"site_racks:{site_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🌐 NetBox",
+                    url=site.get('display_url', '')
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад к поиску",
+                    callback_data="back_to_search"
+                )
+            ]
+        ]
+        
+        await callback.message.edit_text(
+            site_info,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        
+        await callback.answer()
+        
+    except ValueError:
+        await callback.answer("Неверный ID сайта", show_alert=True)
+    except Exception as e:
+        bot_logger.error(f"Site info callback error: {e}")
+        await callback.answer("Ошибка при получении информации о сайте", show_alert=True)
+
+
+@router.message(Command("sites"))
+async def sites_command(message: Message):
+    """Обработчик команды /sites - показать все сайты"""
+    user_id = message.from_user.id
+    
+    try:
+        log_user_action(user_id, "list_sites")
+        
+        # Получаем все сайты
+        sites_result = await netbox_service.get_sites(user_id=user_id)
+        sites = sites_result.get('results', [])
+        
+        if not sites:
+            await message.answer(
+                "🏢 Сайты не найдены\\.",
+                parse_mode="MarkdownV2"
+            )
+            return
+        
+        # Создаем клавиатуру со всеми сайтами
+        keyboard = create_sites_keyboard(sites)
+        
+        message_text = f"🏢 *Все сайты \\({len(sites)}\\):*\n\n"
+        message_text += "Выберите сайт для просмотра подробной информации:"
+        
+        await message.answer(
+            message_text,
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        bot_logger.error(f"Sites command error: {e}")
+        await message.answer(
+            format_error_message("api_error", str(e)),
+            parse_mode="MarkdownV2"
+        )
+
+
+@router.message(Command("device"))
+async def device_command(message: Message, command: CommandObject):
+    """Обработчик команды /device <ID>"""
+    user_id = message.from_user.id
+    
+    try:
+        if not command.args:
+            await message.answer(
+                "🖥️ Использование: `/device <ID>`\n\n"
+                "Пример: `/device 2`",
+                parse_mode="MarkdownV2"
+            )
+            return
+        
+        try:
+            device_id = int(command.args.strip())
+        except ValueError:
+            await message.answer(
+                "❌ ID устройства должно быть числом\\.",
+                parse_mode="MarkdownV2"
+            )
+            return
+        
+        log_user_action(user_id, "view_device_direct", {"device_id": device_id})
+        
+        # Получаем информацию об устройстве
+        device = await netbox_service.get_device_by_id(device_id, user_id=user_id)
+        
+        # Форматируем и отправляем информацию
+        device_info = format_device_info(device)
+        
+        # Создаем клавиатуру
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    text="🔌 Интерфейсы",
+                    callback_data=f"interfaces:{device_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🌐 NetBox",
+                    url=device.get('display_url', '')
+                )
+            ]
+        ]
+        
+        await message.answer(
+            device_info,
+            parse_mode="MarkdownV2",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        
+    except Exception as e:
+        bot_logger.error(f"Device command error: {e}")
+        await message.answer(
+            format_error_message("not_found" if "404" in str(e) else "api_error", str(e)),
+            parse_mode="MarkdownV2"
+        )
