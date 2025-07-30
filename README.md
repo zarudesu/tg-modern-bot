@@ -171,13 +171,4 @@ python test_bot.py
 
 Этот проект использует лицензию MIT. См. файл [LICENSE](LICENSE) для деталей.
 
-## 📞 Поддержка
-
-- **Telegram:** @zardes
-- **Issues:** GitHub Issues
-- **Email:** admin@hhivp.com
-
 ---
-
-**Версия:** 2.0.0  
-**Дата обновления:** $(date +"%d %B %Y")
