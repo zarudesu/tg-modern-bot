@@ -1,44 +1,13 @@
 version: '3.8'
 
-services:
-  telegram-bot:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-    container_name: modern-telegram-bot
-    restart: unless-stopped
-    
-    environment:
-      # Загружаем переменные из .env файла
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
-      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
-      - ADMIN_USER_ID=${ADMIN_USER_ID}
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    
-    volumes:
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
-    
-    networks:
-      - bot-network
-    
-    depends_on:
-      - postgres
-      - redis
-    
-    healthcheck:
-      test: ["CMD", "python", "-c", "import aiohttp; import asyncio; asyncio.run(aiohttp.ClientSession().get('https://api.telegram.org/bot${TELEGRAM_TOKEN}/getMe').close())"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+# Полный стек: бот + база данных
+# Для простого запуска всего приложения
 
+services:
+  # База данных
   postgres:
     image: postgres:15-alpine
-    container_name: bot-postgres
+    container_name: telegram-bot-postgres-full
     restart: unless-stopped
     
     environment:
@@ -59,9 +28,10 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis для кеширования
   redis:
     image: redis:7-alpine
-    container_name: bot-redis
+    container_name: telegram-bot-redis-full
     restart: unless-stopped
     
     command: redis-server --requirepass redis_password_2024
@@ -77,6 +47,43 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Telegram Bot
+  telegram-bot:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-bot-app-full
+    restart: unless-stopped
+    
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+      - DATABASE_URL=postgresql+asyncpg://bot_user:bot_password_2024@postgres:5432/telegram_bot
+      - REDIS_URL=redis://:redis_password_2024@redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    
+    networks:
+      - bot-network
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('Bot is running')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:

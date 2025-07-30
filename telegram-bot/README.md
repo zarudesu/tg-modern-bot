@@ -19,34 +19,37 @@ git clone <your-repo-url>
 cd telegram-bot
 ```
 
-### 2. Настройка окружения
+### 2. Автоматическая настройка для разработки
 ```bash
-# Копируем пример конфигурации
-cp .env.example .env
+# Быстрая настройка независимой разработки
+./setup-dev.sh
 
-# Редактируем .env файл с вашими настройками
+# Настройте токены
 nano .env
 ```
 
-### 3. Запуск с Docker
+### 3. Запуск разработки
 ```bash
-docker-compose up -d
+# Независимая разработка (рекомендуется)
+make dev          # БД в Docker, бот локально
+
+# Или полный Docker стек
+make full-up      # Всё в Docker
 ```
 
-### 4. Или запуск для разработки
+### 4. Альтернативные режимы
 ```bash
-# Создаем виртуальное окружение
-python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# или
-venv\Scripts\activate     # Windows
+# Только база данных
+make db-up
 
-# Устанавливаем зависимости
-pip install -r requirements.txt
+# Только бот в Docker
+make bot-up
 
-# Запускаем бота
-python -m app.main
+# Полный список команд
+make help
 ```
+
+📖 **Детальная документация:** [DEVELOPMENT.md](DEVELOPMENT.md)
 
 ## 📁 Структура проекта
 
