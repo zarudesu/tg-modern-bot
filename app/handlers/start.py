@@ -21,6 +21,11 @@ async def get_or_create_user(session: AsyncSession, message: Message) -> BotUser
     """Получить или создать пользователя в базе данных"""
     telegram_user_id = message.from_user.id
     
+    # Проверяем, что пользователь - администратор
+    if not settings.is_admin(telegram_user_id):
+        bot_logger.warning(f"Non-admin user {telegram_user_id} tried to register")
+        return None
+    
     # Ищем существующего пользователя
     result = await session.execute(
         select(BotUser).where(BotUser.telegram_user_id == telegram_user_id)
@@ -37,8 +42,8 @@ async def get_or_create_user(session: AsyncSession, message: Message) -> BotUser
         await session.commit()
         return user
     
-    # Создаем нового пользователя
-    role = "admin" if telegram_user_id == settings.admin_user_id else "guest"
+    # Создаем нового пользователя (только админов)
+    role = "admin"  # Все пользователи, которые проходят проверку, являются админами
     
     new_user = BotUser(
         telegram_user_id=telegram_user_id,
@@ -52,7 +57,7 @@ async def get_or_create_user(session: AsyncSession, message: Message) -> BotUser
     session.add(new_user)
     await session.commit()
     
-    bot_logger.info(f"New user registered: {telegram_user_id} (@{message.from_user.username})")
+    bot_logger.info(f"New admin user registered: {telegram_user_id} (@{message.from_user.username})")
     
     return new_user
 
@@ -64,23 +69,18 @@ async def start_command(message: Message):
         async for session in get_async_session():
             user = await get_or_create_user(session, message)
             
+            # Если пользователь не админ, get_or_create_user вернет None
+            # но это сообщение никогда не выполнится, так как AuthMiddleware блокирует раньше
+            if not user:
+                return
+            
             log_user_action(user.telegram_user_id, "start")
             
-            # Приветствие зависит от роли пользователя
-            if user.role == "admin":
-                welcome_text = f"👋 Добро пожаловать, *Администратор*\\!\n\n"
-            else:
-                welcome_text = f"👋 Добро пожаловать, *{escape_markdown(user.first_name or 'Пользователь')}*\\!\n\n"
+            # Приветствие для администратора
+            welcome_text = f"👋 Добро пожаловать, *Администратор*\\!\n\n"
             
             welcome_text += (
-                "🤖 Я *HHIVP IT Management Bot* \\- ваш помощник для управления IT\\-инфраструктурой\\.\n\n"
-                "*Мои возможности:*\n"
-                "🔍 Поиск устройств в NetBox\n"
-                "🏢 Информация о сайтах и стойках\n"
-                "🌐 Управление IP адресами\n"
-                "🔐 Интеграция с Vaultwarden\n"
-                "📚 Поиск в документации Outline\n"
-                "🎫 Работа с тикетами Zammad\n\n"
+                "🤖 Я *Modern Telegram Bot* \\- ваш помощник\\.\n\n"
                 "Используйте /help для получения списка команд\\."
             )
             
@@ -172,9 +172,6 @@ async def ping_command(message: Message):
 COMMANDS_MENU = [
     BotCommand(command="start", description="🚀 Начать работу с ботом"),
     BotCommand(command="help", description="❓ Справка по командам"),
-    BotCommand(command="search", description="🔍 Поиск устройств в NetBox"),
-    BotCommand(command="sites", description="🏢 Список сайтов"),
-    BotCommand(command="device", description="🖥️ Информация об устройстве"),
     BotCommand(command="profile", description="👤 Мой профиль"),
     BotCommand(command="ping", description="🏓 Проверка работоспособности"),
 ]

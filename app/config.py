@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     telegram_token: str
     telegram_api_id: int
     telegram_api_hash: str
-    admin_user_id: int
+    admin_user_ids: str  # Строка с ID админов через запятую
     
     # Database
     database_url: str
@@ -44,14 +44,35 @@ class Settings(BaseSettings):
     max_search_results: int = 20
     session_timeout: int = 3600  # 1 hour
     
+    @field_validator('admin_user_ids')
+    @classmethod
+    def validate_admin_user_ids(cls, v):
+        if not v or not v.strip():
+            raise ValueError('At least one admin user ID is required')
+        # Проверяем, что все ID являются числами
+        try:
+            ids = [int(id.strip()) for id in v.split(',') if id.strip()]
+            if not ids:
+                raise ValueError('At least one valid admin user ID is required')
+            return v
+        except ValueError:
+            raise ValueError('Admin user IDs must be comma-separated integers')
+    
+    @property
+    def admin_user_id_list(self) -> List[int]:
+        """Получить список ID админов как список чисел"""
+        return [int(id.strip()) for id in self.admin_user_ids.split(',') if id.strip()]
+    
+    def is_admin(self, user_id: int) -> bool:
+        """Проверить, является ли пользователь администратором"""
+        return user_id in self.admin_user_id_list
+    
     @field_validator('telegram_token')
     @classmethod
     def validate_telegram_token(cls, v):
         if not v or len(v) < 10:
             raise ValueError('Invalid Telegram token')
         return v
-    
-    @field_validator('database_url')
     @classmethod
     def validate_database_url(cls, v):
         if not v.startswith(('postgresql://', 'postgresql+asyncpg://')):
@@ -75,7 +96,7 @@ settings = Settings()
 
 # Константы для удобства
 TELEGRAM_TOKEN = settings.telegram_token
-ADMIN_USER_ID = settings.admin_user_id
+ADMIN_USER_IDS = settings.admin_user_id_list
 DATABASE_URL = settings.database_url
 REDIS_URL = settings.redis_url
 # NETBOX_URL = settings.netbox_url

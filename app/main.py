@@ -41,19 +41,24 @@ async def on_startup(bot: Bot):
         bot_info = await bot.get_me()
         bot_logger.info(f"Bot started: @{bot_info.username} (ID: {bot_info.id})")
         
-        # Уведомляем администратора о запуске
-        try:
-            await bot.send_message(
-                chat_id=settings.admin_user_id,
-                text="🟢 *HHIVP IT Bot запущен успешно\\!*\n\n"
-                     f"🤖 *Username:* @{bot_info.username}\n"
-                     f"🆔 *Bot ID:* {bot_info.id}\n"
-                     f"📊 *Версия:* 1\\.0\\.0\n"
-                     f"🕐 *Время запуска:* {asyncio.get_event_loop().time():.0f}",
-                parse_mode="MarkdownV2"
-            )
-        except Exception as e:
-            bot_logger.warning(f"Could not notify admin about startup: {e}")
+        # Уведомляем всех администраторов о запуске
+        startup_message = (
+            "🟢 *Modern Telegram Bot запущен успешно\\!*\n\n"
+            f"🤖 *Username:* @{bot_info.username}\n"
+            f"🆔 *Bot ID:* {bot_info.id}\n"
+            f"📊 *Версия:* 1\\.0\\.0\n"
+            f"🕐 *Время запуска:* {asyncio.get_event_loop().time():.0f}"
+        )
+        
+        for admin_id in settings.admin_user_id_list:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=startup_message,
+                    parse_mode="MarkdownV2"
+                )
+            except Exception as e:
+                bot_logger.warning(f"Could not notify admin {admin_id} about startup: {e}")
             
     except Exception as e:
         bot_logger.error(f"Startup failed: {e}")
@@ -65,16 +70,21 @@ async def on_shutdown(bot: Bot):
     bot_logger.info("Bot shutdown initiated")
     
     try:
-        # Уведомляем администратора о завершении
-        try:
-            await bot.send_message(
-                chat_id=settings.admin_user_id,
-                text="🔴 *HHIVP IT Bot завершает работу\\.*\n\n"
-                     "🛑 Все процессы будут остановлены\\.",
-                parse_mode="MarkdownV2"
-            )
-        except Exception as e:
-            bot_logger.warning(f"Could not notify admin about shutdown: {e}")
+        # Уведомляем всех администраторов о завершении
+        shutdown_message = (
+            "🔴 *Modern Telegram Bot завершает работу\\.*\n\n"
+            "🛑 Все процессы будут остановлены\\."
+        )
+        
+        for admin_id in settings.admin_user_id_list:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=shutdown_message,
+                    parse_mode="MarkdownV2"
+                )
+            except Exception as e:
+                bot_logger.warning(f"Could not notify admin {admin_id} about shutdown: {e}")
         
         # Закрываем подключение к базе данных
         await close_db()

@@ -37,10 +37,25 @@ class AuthMiddleware(BaseMiddleware):
             bot_logger.warning("Event without user received")
             return await handler(event, data)
         
-        # Проверяем заблокированных пользователей
-        if user.id in getattr(settings, 'blocked_users', []):
-            bot_logger.warning(f"Blocked user {user.id} tried to use bot")
-            return
+        # Проверяем, является ли пользователь администратором
+        if not settings.is_admin(user.id):
+            bot_logger.warning(f"Non-admin user {user.id} (@{user.username}) tried to use bot")
+            
+            # Отправляем сообщение о том, что бот только для админов
+            if isinstance(event, Message):
+                await event.answer(
+                    "🔒 *Доступ ограничен*\n\n"
+                    "Этот бот доступен только администраторам\\.",
+                    parse_mode="MarkdownV2"
+                )
+            elif isinstance(event, CallbackQuery):
+                await event.answer(
+                    "Доступ ограничен. Бот только для администраторов.",
+                    show_alert=True
+                )
+            return  # Блокируем выполнение
+        
+        # Если пользователь админ, продолжаем обработку
         
         # Получаем информацию о пользователе из базы
         try:

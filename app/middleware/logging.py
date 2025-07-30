@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from ..database.database import get_async_session
-from ..database.models import MessageLog
+from ..database.models import MessageLog, BotUser
 from ..utils.logger import bot_logger
+from sqlalchemy import select
 
 
 class LoggingMiddleware(BaseMiddleware):
@@ -98,6 +99,18 @@ class LoggingMiddleware(BaseMiddleware):
             
             # Сохраняем в базу данных
             async for session in get_async_session():
+                # Проверяем, существует ли пользователь в базе
+                user_result = await session.execute(
+                    select(BotUser).where(BotUser.telegram_user_id == message.from_user.id)
+                )
+                user_exists = user_result.scalar_one_or_none()
+                
+                # Если пользователь не существует, пропускаем логирование
+                # (пользователь будет создан в обработчике команд)
+                if not user_exists:
+                    bot_logger.debug(f"Skipping message log for new user {message.from_user.id}")
+                    return
+                
                 log_entry = MessageLog(
                     telegram_message_id=message.message_id,
                     telegram_user_id=message.from_user.id,
@@ -124,6 +137,17 @@ class LoggingMiddleware(BaseMiddleware):
             
             # Сохраняем в базу данных
             async for session in get_async_session():
+                # Проверяем, существует ли пользователь в базе
+                user_result = await session.execute(
+                    select(BotUser).where(BotUser.telegram_user_id == callback.from_user.id)
+                )
+                user_exists = user_result.scalar_one_or_none()
+                
+                # Если пользователь не существует, пропускаем логирование
+                if not user_exists:
+                    bot_logger.debug(f"Skipping callback log for new user {callback.from_user.id}")
+                    return
+                
                 log_entry = MessageLog(
                     telegram_message_id=callback.id,  # Используем ID callback query
                     telegram_user_id=callback.from_user.id,
