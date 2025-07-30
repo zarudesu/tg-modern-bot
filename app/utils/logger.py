@@ -40,44 +40,19 @@ def setup_logging():
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
-    # Обработчик для консоли
-    if settings.log_format == "json":
-        console_format = JSONFormatter().format
-    else:
-        console_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-            "<level>{message}</level>"
-        )
+    # Только консольное логирование (упрощенная версия)
+    console_format = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+        "<level>{message}</level>"
+    )
     
     logger.add(
         sys.stdout,
         format=console_format,
         level=settings.log_level,
-        colorize=True if settings.log_format != "json" else False
-    )
-    
-    # Обработчик для файла (всегда JSON)
-    logger.add(
-        log_dir / "bot.log",
-        format=JSONFormatter().format,
-        level="DEBUG",
-        rotation=settings.max_log_size,
-        retention=settings.log_retention,
-        compression="gz",
-        encoding="utf-8"
-    )
-    
-    # Отдельный файл для ошибок
-    logger.add(
-        log_dir / "errors.log",
-        format=JSONFormatter().format,
-        level="ERROR",
-        rotation="10 MB",
-        retention="60 days",
-        compression="gz",
-        encoding="utf-8"
+        colorize=True
     )
     
     return logger

@@ -5,6 +5,26 @@
 echo "🤖 Настройка независимой разработки Telegram бота"
 echo "==============================================="
 
+# Проверяем базовые утилиты
+if ! command -v bc &> /dev/null; then
+    echo "📦 Устанавливаем утилиту bc для сравнения версий..."
+    if command -v brew &> /dev/null; then
+        brew install bc
+    elif command -v apt-get &> /dev/null; then
+        sudo apt-get install -y bc
+    else
+        echo "⚠️  bc не найден, но продолжаем..."
+        # Создаем простую функцию для сравнения версий
+        version_compare() {
+            if [[ $1 == *"3.13"* ]] || [[ $1 == *"3.14"* ]] || [[ $1 == *"3.15"* ]]; then
+                return 1  # версия слишком новая
+            else
+                return 0  # версия подходящая
+            fi
+        }
+    fi
+fi
+
 # Проверяем Docker
 echo "🐳 Проверяем Docker..."
 if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
@@ -18,13 +38,35 @@ else
     exit 1
 fi
 
-# Проверяем Python
+# Проверяем Python и находим совместимую версию
 echo "🐍 Проверяем Python..."
-if command -v python3 &> /dev/null; then
-    PYTHON_VERSION=$(python3 --version)
-    echo "✅ Python найден: $PYTHON_VERSION"
-else
-    echo "❌ Python3 не найден! Установите Python 3.8+"
+
+# Список предпочтительных версий Python (от новой к старой, но совместимых)
+PYTHON_VERSIONS=("python3.12" "python3.11" "python3.10" "python3.9" "python3.8" "python3")
+
+PYTHON_CMD=""
+for version in "${PYTHON_VERSIONS[@]}"; do
+    if command -v $version &> /dev/null; then
+        # Проверяем, что версия не 3.13+
+        VERSION_NUM=$($version -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        MAJOR=$(echo $VERSION_NUM | cut -d. -f1)
+        MINOR=$(echo $VERSION_NUM | cut -d. -f2)
+        
+        if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 13 ]; then
+            PYTHON_CMD=$version
+            PYTHON_VERSION=$($version --version)
+            echo "✅ Совместимый Python найден: $PYTHON_VERSION ($version)"
+            break
+        else
+            echo "⚠️  $version (версия $VERSION_NUM) слишком новая, ищем более старую..."
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "❌ Совместимая версия Python не найдена!"
+    echo "   Установите Python 3.8-3.12. Python 3.13+ пока не поддерживается."
+    echo "   Попробуйте: brew install python@3.12"
     exit 1
 fi
 
@@ -37,8 +79,8 @@ echo "✅ Директории созданы"
 
 # Создаем виртуальное окружение если его нет
 if [ ! -d "venv" ]; then
-    echo "📦 Создаем виртуальное окружение..."
-    python3 -m venv venv
+    echo "📦 Создаем виртуальное окружение с $PYTHON_CMD..."
+    $PYTHON_CMD -m venv venv
     echo "✅ Виртуальное окружение создано"
 else
     echo "✅ Виртуальное окружение уже существует"
