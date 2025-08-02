@@ -13,6 +13,8 @@ from .utils.logger import bot_logger, setup_logging
 from .middleware.auth import AuthMiddleware
 from .middleware.logging import LoggingMiddleware, GroupMonitoringMiddleware, PerformanceMiddleware
 from .handlers import start
+from .handlers import work_journal
+from .handlers import plane_testing
 from .handlers.start import COMMANDS_MENU
 
 
@@ -126,6 +128,8 @@ async def main():
         
         # Регистрация роутеров
         dp.include_router(start.router)
+        dp.include_router(work_journal.router)
+        dp.include_router(plane_testing.router)
         
         # Регистрация событий жизненного цикла
         dp.startup.register(on_startup)

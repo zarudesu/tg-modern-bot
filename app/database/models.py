@@ -33,6 +33,11 @@ class BotUser(Base):
     # Связи
     message_logs = relationship("MessageLog", back_populates="user")
     sessions = relationship("UserSession", back_populates="user")
+    work_journal_entries = relationship(
+        "WorkJournalEntry", 
+        back_populates="user",
+        foreign_keys="[WorkJournalEntry.telegram_user_id]"
+    )
     
     # Индексы
     __table_args__ = (

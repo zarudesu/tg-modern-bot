@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     zammad_url: Optional[str] = None
     zammad_token: Optional[str] = None
     
+    # n8n Integration (for work journal)
+    n8n_webhook_url: Optional[str] = None
+    n8n_webhook_secret: Optional[str] = None
+    
+    # Google Sheets Configuration (used by n8n)
+    google_sheets_id: Optional[str] = None
+    
+    # Plane Integration
+    plane_chat_id: Optional[int] = None
+    plane_topic_id: Optional[int] = None
+    plane_webhook_secret: Optional[str] = None
+    
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"

@@ -1,0 +1,215 @@
+{
+  "name": "HHIVP Telegram to Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "work-journal",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook - Telegram Bot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "auto-generated"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Извлекаем данные из webhook\nconst webhookData = items[0].json;\n\n// Проверяем структуру данных\nif (!webhookData.data || !webhookData.data.work_entry) {\n  throw new Error('Invalid webhook data structure');\n}\n\nconst workEntry = webhookData.data.work_entry;\nconst creator = webhookData.data.creator || {};\nconst user = webhookData.data.user || {};\n\n// Логирование для отладки\nconsole.log('Received webhook data:', JSON.stringify(webhookData, null, 2));\n\n// Форматируем для Google Sheets\nconst formattedData = {\n  timestamp: new Date().toISOString(),\n  date: workEntry.date,\n  company: workEntry.company,\n  duration: workEntry.duration,\n  description: workEntry.description,\n  travel: workEntry.is_travel ? 'Да' : 'Нет',\n  workers: Array.isArray(workEntry.workers) ? workEntry.workers.join(', ') : (workEntry.workers || 'Не указан'),\n  workers_count: workEntry.workers_count || 1,\n  creator: creator.name || user.first_name || 'Не указан',\n  creator_id: creator.telegram_id || user.telegram_id || 'Не указан',\n  creator_email: user.email || 'Не указан'\n};\n\nconsole.log('Formatted data for Sheets:', JSON.stringify(formattedData, null, 2));\n\nreturn [{ json: formattedData }];"
+      },
+      "id": "code-transform",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEETS_ID_HERE",
+        "sheetName": "Sheet1",
+        "columnNames": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.timestamp }}",
+            "Date": "={{ $json.date }}",
+            "Company": "={{ $json.company }}",
+            "Duration": "={{ $json.duration }}",
+            "Description": "={{ $json.description }}",
+            "Travel": "={{ $json.travel }}",
+            "Workers": "={{ $json.workers }}",
+            "Workers_Count": "={{ $json.workers_count }}",
+            "Creator": "={{ $json.creator }}",
+            "Creator_ID": "={{ $json.creator_id }}",
+            "Creator_Email": "={{ $json.creator_email }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "google-sheets",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "googleSheetsApi": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIALS_ID",
+          "name": "Google Sheets API - Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"success\",\n  \"message\": \"Work journal entry successfully added to Google Sheets\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"entry_id\": \"{{ $('Transform Data').item.json.creator_id }}_{{ new Date().getTime() }}\"\n}",
+        "options": {}
+      },
+      "id": "response-success",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"error\",\n  \"message\": \"Failed to process work journal entry\",\n  \"error\": \"{{ $json.error || 'Unknown error occurred' }}\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "response-error",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        680,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Логирование ошибки для отладки\nconst errorData = items[0].json;\nconsole.log('Error occurred:', JSON.stringify(errorData, null, 2));\n\n// Форматируем ошибку для ответа\nconst formattedError = {\n  error: errorData.error || errorData.message || 'Unknown error',\n  timestamp: new Date().toISOString(),\n  workflow: 'HHIVP-Telegram-to-Sheets',\n  node: errorData.node || 'Unknown node'\n};\n\nreturn [{ json: formattedError }];"
+      },
+      "id": "error-format",
+      "name": "Format Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        680,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook - Telegram Bot": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "timezone": "Europe/Moscow"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "hhivp-telegram-to-sheets",
+  "tags": [
+    {
+      "createdAt": "2025-08-01T12:00:00.000Z",
+      "updatedAt": "2025-08-01T12:00:00.000Z",
+      "id": "telegram",
+      "name": "telegram"
+    },
+    {
+      "createdAt": "2025-08-01T12:00:00.000Z", 
+      "updatedAt": "2025-08-01T12:00:00.000Z",
+      "id": "google-sheets",
+      "name": "google-sheets"
+    },
+    {
+      "createdAt": "2025-08-01T12:00:00.000Z",
+      "updatedAt": "2025-08-01T12:00:00.000Z", 
+      "id": "hhivp",
+      "name": "hhivp"
+    }
+  ]
+}

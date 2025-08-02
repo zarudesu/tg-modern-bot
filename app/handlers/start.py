@@ -174,4 +174,7 @@ COMMANDS_MENU = [
     BotCommand(command="help", description="❓ Справка по командам"),
     BotCommand(command="profile", description="👤 Мой профиль"),
     BotCommand(command="ping", description="🏓 Проверка работоспособности"),
+    BotCommand(command="journal", description="📋 Создать запись в журнале работ"),
+    BotCommand(command="history", description="📊 История работ"),
+    BotCommand(command="report", description="📈 Отчеты по работам"),
 ]
