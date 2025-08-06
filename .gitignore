@@ -1,0 +1,83 @@
+# Environment variables (КРИТИЧНО!)
+.env
+.env.local
+.env.production
+.env.prod
+.env.prod.local
+.env.dev
+.env.development
+
+# Logs
+logs/
+*.log
+
+# Backup files
+backup/
+backups/
+*.sql
+*.tar.gz
+
+# Docker volumes
+postgres_data/
+redis_data/
+netbox_media/
+vaultwarden_data/
+bookstack_config/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# Nginx Proxy Manager data
+nginx_data/
+nginx_letsencrypt/
+
+# Local configuration overrides
+docker-compose.override.yml
+configs/local/
+
+# Персональные данные (БЕЗОПАСНОСТЬ!)
+*.token
+*.secret
+*_secret*
+*_token*
+credentials.json
+service-account.json
+
+# Локальные тестовые файлы
+test_local*
+debug*

@@ -1,0 +1,115 @@
+# Отдельный docker-compose только для базы данных
+# Используется для независимой разработки
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: telegram-bot-postgres
+    restart: unless-stopped
+    
+    environment:
+      - POSTGRES_DB=telegram_bot
+      - POSTGRES_USER=bot_user
+      - POSTGRES_PASSWORD=bot_password_2024
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    
+    ports:
+      - "5432:5432"  # Открываем порт для внешних подключений
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d  # Скрипты инициализации
+      - ./backups:/backups
+    
+    networks:
+      - bot-network
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot_user -d telegram_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+    command: >
+      postgres 
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-bot-redis
+    restart: unless-stopped
+    
+    environment:
+      - REDIS_PASSWORD=redis_password_2024
+    
+    ports:
+      - "6379:6379"  # Открываем порт для внешних подключений
+    
+    command: >
+      redis-server 
+      --requirepass redis_password_2024
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    
+    networks:
+      - bot-network
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Опциональный админ-интерфейс для PostgreSQL
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: telegram-bot-pgadmin
+    restart: unless-stopped
+    
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin_password_2024
+      - PGADMIN_LISTEN_PORT=80
+    
+    ports:
+      - "8080:80"
+    
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    
+    networks:
+      - bot-network
+    
+    depends_on:
+      - postgres
+    
+    profiles:
+      - admin  # Запускается только при --profile admin
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  bot-network:
+    driver: bridge
+    name: telegram-bot-network

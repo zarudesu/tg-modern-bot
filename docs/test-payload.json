@@ -1,0 +1,27 @@
+{
+  "source": "telegram_bot",
+  "event_type": "work_journal_entry",
+  "timestamp": "2025-08-01T15:30:45Z",
+  "data": {
+    "entry_id": 123,
+    "user": {
+      "telegram_id": YOUR_TELEGRAM_ID,
+      "email": "kostya@hhivp.com",
+      "first_name": "Kostya",
+      "username": "kostya_admin"
+    },
+    "work_entry": {
+      "date": "2025-08-01",
+      "company": "Ива",
+      "duration": "45 мин",
+      "description": "Тестовая запись для проверки интеграции с n8n и Google Sheets. Проверяем корректность передачи всех данных и форматирования.",
+      "is_travel": false,
+      "workers": ["Тимофей", "Дима"],
+      "workers_count": 2
+    },
+    "creator": {
+      "name": "Kostya",
+      "telegram_id": YOUR_TELEGRAM_ID
+    }
+  }
+}

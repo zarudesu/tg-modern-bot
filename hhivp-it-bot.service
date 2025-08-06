@@ -1,0 +1,30 @@
+[Unit]
+Description=HHIVP IT Assistant Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=hhivp-bot
+Group=hhivp-bot
+WorkingDirectory=/opt/hhivp-it-bot
+Environment=PATH=/opt/hhivp-it-bot/venv/bin
+ExecStart=/opt/hhivp-it-bot/bot_manager_prod.sh start
+ExecStop=/opt/hhivp-it-bot/bot_manager_prod.sh stop
+ExecReload=/opt/hhivp-it-bot/bot_manager_prod.sh restart
+PIDFile=/opt/hhivp-it-bot/bot.pid
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hhivp-it-bot
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hhivp-it-bot
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

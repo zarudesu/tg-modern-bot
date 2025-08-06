@@ -1,0 +1,195 @@
+"""
+Сервис для работы с NetBox API
+"""
+import aiohttp
+import asyncio
+from typing import List, Dict, Any, Optional
+from urllib.parse import urljoin, quote
+from ..config import settings
+from ..utils.logger import bot_logger, log_api_request
+
+
+class NetBoxService:
+    """Клиент для работы с NetBox API"""
+    
+    def __init__(self):
+        self.base_url = settings.netbox_url
+        self.token = settings.netbox_token
+        self.headers = {
+            "Authorization": f"Token {self.token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json; indent=4"
+        }
+    
+    async def _make_request(self, method: str, endpoint: str, 
+                          params: Optional[Dict] = None, 
+                          data: Optional[Dict] = None,
+                          user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Выполнение HTTP запроса к NetBox API"""
+        url = urljoin(self.base_url, endpoint.lstrip('/'))
+        
+        start_time = asyncio.get_event_loop().time()
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(
+                    method=method,
+                    url=url,
+                    headers=self.headers,
+                    params=params,
+                    json=data,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    execution_time = asyncio.get_event_loop().time() - start_time
+                    
+                    # Логируем запрос
+                    log_api_request(
+                        service="netbox",
+                        endpoint=endpoint,
+                        method=method,
+                        user_id=user_id,
+                        execution_time=execution_time
+                    )
+                    
+                    if response.status == 200:
+                        result = await response.json()
+                        bot_logger.debug(f"NetBox API success: {endpoint}")
+                        return result
+                    else:
+                        error_text = await response.text()
+                        bot_logger.error(f"NetBox API error {response.status}: {error_text}")
+                        raise aiohttp.ClientResponseError(
+                            request_info=response.request_info,
+                            history=response.history,
+                            status=response.status,
+                            message=error_text
+                        )
+                        
+        except asyncio.TimeoutError:
+            bot_logger.error(f"NetBox API timeout: {endpoint}")
+            raise
+        except Exception as e:
+            bot_logger.error(f"NetBox API request failed: {e}")
+            raise
+    
+    async def get_devices(self, search: Optional[str] = None, 
+                         limit: int = 10, 
+                         user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение списка устройств"""
+        params = {"limit": limit}
+        
+        if search:
+            params["q"] = search
+            
+        return await self._make_request(
+            method="GET",
+            endpoint="/dcim/devices/",
+            params=params,
+            user_id=user_id
+        )
+    
+    async def get_device_by_id(self, device_id: int, 
+                              user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение устройства по ID"""
+        return await self._make_request(
+            method="GET",
+            endpoint=f"/dcim/devices/{device_id}/",
+            user_id=user_id
+        )
+    
+    async def get_sites(self, search: Optional[str] = None,
+                       limit: int = 20,
+                       user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение списка сайтов"""
+        params = {"limit": limit}
+        
+        if search:
+            params["q"] = search
+            
+        return await self._make_request(
+            method="GET",
+            endpoint="/dcim/sites/",
+            params=params,
+            user_id=user_id
+        )
+    
+    async def get_site_by_id(self, site_id: int,
+                            user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение сайта по ID"""
+        return await self._make_request(
+            method="GET",
+            endpoint=f"/dcim/sites/{site_id}/",
+            user_id=user_id
+        )
+    
+    async def search_ip_addresses(self, query: str,
+                                 limit: int = 10,
+                                 user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Поиск IP адресов"""
+        params = {"q": query, "limit": limit}
+        
+        return await self._make_request(
+            method="GET",
+            endpoint="/ipam/ip-addresses/",
+            params=params,
+            user_id=user_id
+        )
+    
+    async def get_device_interfaces(self, device_id: int,
+                                   user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение интерфейсов устройства"""
+        params = {"device_id": device_id}
+        
+        return await self._make_request(
+            method="GET",
+            endpoint="/dcim/interfaces/",
+            params=params,
+            user_id=user_id
+        )
+    
+    async def get_racks(self, site_id: Optional[int] = None,
+                       user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Получение списка стоек"""
+        params = {}
+        if site_id:
+            params["site_id"] = site_id
+            
+        return await self._make_request(
+            method="GET",
+            endpoint="/dcim/racks/",
+            params=params,
+            user_id=user_id
+        )
+    
+    async def search_global(self, query: str,
+                           user_id: Optional[int] = None) -> Dict[str, List[Dict]]:
+        """Глобальный поиск по NetBox"""
+        results = {
+            "devices": [],
+            "sites": [],
+            "ip_addresses": [],
+            "racks": []
+        }
+        
+        try:
+            # Поиск устройств
+            devices_result = await self.get_devices(search=query, limit=5, user_id=user_id)
+            results["devices"] = devices_result.get("results", [])
+            
+            # Поиск сайтов
+            sites_result = await self.get_sites(search=query, limit=5, user_id=user_id)
+            results["sites"] = sites_result.get("results", [])
+            
+            # Поиск IP адресов
+            try:
+                ip_result = await self.search_ip_addresses(query, limit=5, user_id=user_id)
+                results["ip_addresses"] = ip_result.get("results", [])
+            except Exception:
+                # IP поиск может не сработать если запрос не похож на IP
+                pass
+            
+            return results
+            
+        except Exception as e:
+            bot_logger.error(f"Global search failed: {e}")
+            return results
