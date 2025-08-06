@@ -120,7 +120,7 @@ GOOGLE_SHEETS_CREDENTIALS_JSON='{"type":"service_account","project_id":"hhivp-pl
 
 ```bash
 # Перейти в директорию проекта
-cd /Users/zardes/Projects/tg-mordern-bot
+cd /Users/admin-user/Projects/tg-mordern-bot
 
 # Установить зависимости (если не установлены)
 pip install gspread google-auth

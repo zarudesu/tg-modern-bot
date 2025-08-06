@@ -5,8 +5,8 @@ import asyncio
 import sys
 from datetime import date, timedelta
 
-# Добавляем путь к проекту для импорта модулей
-sys.path.append('/Users/zardes/Projects/tg-mordern-bot')
+# Add project path for module imports
+sys.path.append('/path/to/your/project')
 
 from app.database.database import get_async_session, init_db
 from app.services.work_journal_service import WorkJournalService, init_default_data

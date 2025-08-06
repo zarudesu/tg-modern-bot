@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Директория проекта
-PROJECT_DIR="/Users/zardes/Projects/tg-mordern-bot"
+PROJECT_DIR="/path/to/your/project"
 BOT_NAME="HHIVP IT Assistant Bot"
 PYTHON_VENV="$PROJECT_DIR/venv/bin/python"
 BOT_MODULE="app.main"

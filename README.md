@@ -5,240 +5,236 @@
 [![Telegram](https://img.shields.io/badge/Telegram-Bot%20API-blue.svg)](https://core.telegram.org/bots/api)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://postgresql.org/)
 
-**Современный Telegram-бот для управления IT-командой с полной интеграцией в production окружение.**
+**Modern production-ready Telegram bot for team management with full integration capabilities.**
 
 ---
 
-## ✨ **Ключевые возможности**
+## ✨ **Key Features**
 
-### 📊 **Журнал работ**
-- ✅ Создание записей о выполненных работах
-- ✅ Множественный выбор исполнителей
-- ✅ Парсинг времени: "1 час 30 минут" → 90 минут
-- ✅ Фильтрация по дате, компании, работнику
-- ✅ Экспорт отчетов
+### 📊 **Work Journal**
+- ✅ Create work entries with detailed tracking
+- ✅ Multiple worker selection
+- ✅ Smart time parsing: "1 hour 30 minutes" → 90 minutes
+- ✅ Filter by date, company, worker
+- ✅ Export reports
 
-### 🔗 **Интеграции**
-- ✅ **n8n** - автоматическая отправка в Google Sheets
-- ✅ **Telegram Groups** - уведомления с упоминаниями
-- ✅ **PostgreSQL** - надежное хранение данных
-- ✅ **Redis** - кэширование и сессии
+### 🔗 **Integrations**
+- ✅ **n8n** - automatic Google Sheets sync
+- ✅ **Telegram Groups** - notifications with mentions
+- ✅ **PostgreSQL** - reliable data storage
+- ✅ **Redis** - caching and sessions
 
 ### 🐳 **Production Ready**
-- ✅ **Docker** контейнеризация
-- ✅ **Alembic** миграции БД
-- ✅ **Makefile** команды развертывания
-- ✅ **Health checks** и мониторинг
+- ✅ **Docker** containerization
+- ✅ **Alembic** database migrations
+- ✅ **Makefile** deployment commands
+- ✅ **Health checks** and monitoring
 - ✅ **Graceful shutdown**
 
 ---
 
-## 🚀 **Быстрый старт**
+## 🚀 **Quick Start**
 
-### 1️⃣ **Клонирование и настройка**
+### 1️⃣ **Clone and setup**
 ```bash
-# Клонировать репозиторий
-git clone https://github.com/zarudesu/tg-modern-bot.git
+git clone https://github.com/yourusername/tg-modern-bot.git
 cd tg-modern-bot
-
-# Создать конфигурацию из шаблона
 cp .env.example .env
 ```
 
-### 2️⃣ **Получить токены**
-1. **Telegram Bot**: Создать в [@BotFather](https://t.me/BotFather)
-2. **API Credentials**: Получить на [my.telegram.org](https://my.telegram.org)
-3. **Admin ID**: Узнать через [@userinfobot](https://t.me/userinfobot)
+### 2️⃣ **Get tokens**
+1. **Telegram Bot**: Create in [@BotFather](https://t.me/BotFather)
+2. **API Credentials**: Get from [my.telegram.org](https://my.telegram.org)
+3. **Admin ID**: Find via [@userinfobot](https://t.me/userinfobot)
 
-### 3️⃣ **Заполнить .env файл**
+### 3️⃣ **Configure .env file**
 ```env
-TELEGRAM_TOKEN=ваш_токен_от_botfather
-TELEGRAM_API_ID=ваш_api_id
-TELEGRAM_API_HASH=ваш_api_hash
-ADMIN_USER_IDS=ваш_telegram_id
+TELEGRAM_TOKEN=your_token_from_botfather
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+ADMIN_USER_IDS=your_telegram_id
 ```
 
-### 4️⃣ **Запустить**
+### 4️⃣ **Launch**
 ```bash
-# Режим разработки (база в Docker, бот локально)
+# Development mode (database in Docker, bot locally)
 make dev
 
-# Полный stack в Docker
+# Full stack in Docker
 make full-up
 
-# Production развертывание
+# Production deployment
 make prod-deploy
 ```
 
 ---
 
-## 📁 **Архитектура проекта**
+## 📁 **Project Architecture**
 
 ```
 tg-modern-bot/
-├── 📁 app/                    # Основной код приложения
-│   ├── 📁 handlers/          # Telegram обработчики
-│   ├── 📁 services/          # Бизнес-логика
-│   ├── 📁 database/          # Модели и БД
-│   ├── 📁 middleware/        # Промежуточное ПО
-│   └── 📁 integrations/      # Внешние API
-├── 📁 docs/                  # Полная документация
-├── 📁 alembic/              # Миграции БД
-├── 🐳 docker-compose.yml    # Docker конфигурация
-├── ⚡ Makefile              # Команды развертывания
-└── 🔧 .env.example         # Шаблон конфигурации
+├── 📁 app/                    # Main application code
+│   ├── 📁 handlers/          # Telegram handlers
+│   ├── 📁 services/          # Business logic
+│   ├── 📁 database/          # Models and DB
+│   ├── 📁 middleware/        # Middleware
+│   └── 📁 integrations/      # External APIs
+├── 📁 docs/                  # Complete documentation
+├── 📁 alembic/              # Database migrations
+├── 🐳 docker-compose.yml    # Docker configuration
+├── ⚡ Makefile              # Deployment commands
+└── 🔧 .env.example         # Configuration template
 ```
 
 ---
 
-## 🛠️ **Команды разработки**
+## 🛠️ **Development Commands**
 
-### **Разработка**
+### **Development**
 ```bash
-make dev          # База в Docker, бот локально
-make dev-restart  # Перезапуск разработки
-make dev-stop     # Остановка
+make dev          # Database in Docker, bot locally
+make dev-restart  # Restart development
+make dev-stop     # Stop
 ```
 
-### **База данных**
+### **Database**
 ```bash
-make db-up        # Запустить PostgreSQL + Redis
-make db-shell     # PostgreSQL консоль  
-make db-admin     # pgAdmin веб-интерфейс
-make db-backup    # Создать бэкап
+make db-up        # Start PostgreSQL + Redis
+make db-shell     # PostgreSQL console  
+make db-admin     # pgAdmin web interface
+make db-backup    # Create backup
 ```
 
 ### **Production**
 ```bash
-make prod-deploy  # Полное развертывание
-make prod-up      # Запуск сервисов
-make prod-logs    # Просмотр логов
-make prod-backup  # Бэкап продакшена
+make prod-deploy  # Full deployment
+make prod-up      # Start services
+make prod-logs    # View logs
+make prod-backup  # Production backup
 ```
 
-### **Тестирование**
+### **Testing**
 ```bash
-make test                    # Запуск всех тестов
-python test_work_journal.py  # Тест журнала работ
-python test_n8n_integration.py  # Тест n8n
+make test                    # Run all tests
+python test_work_journal.py  # Work journal test
+python test_basic.py         # Basic functionality
 ```
 
 ---
 
-## 🔐 **Безопасность**
+## 🔐 **Security**
 
-### ✅ **Безопасная конфигурация**
-- 🔒 Токены только в `.env` файлах (не в Git)
-- 🔒 Авторизация по `ADMIN_USER_IDS`
-- 🔒 Валидация всех данных через Pydantic
-- 🔒 SQL Injection защита через SQLAlchemy ORM
+### ✅ **Secure configuration**
+- 🔒 Tokens only in `.env` files (not in Git)
+- 🔒 Authorization via `ADMIN_USER_IDS`
+- 🔒 Data validation through Pydantic
+- 🔒 SQL Injection protection via SQLAlchemy ORM
 
-### ✅ **Production готовность**  
-- 🔒 Environment variables для всех секретов
-- 🔒 Docker secrets поддержка
-- 🔒 Rate limiting настроен
-- 🔒 Полное логирование действий
-
----
-
-## 📊 **Модули системы**
-
-### 🎯 **Журнал работ** *(v1.1 - Готов)*
-- Создание записей через удобный интерфейс
-- Множественный выбор исполнителей  
-- Умный парсер времени работы
-- Фильтрация и поиск записей
-- Экспорт в различных форматах
-
-### 🔗 **n8n интеграция** *(v1.1 - Готов)*
-- Автоматическая отправка в Google Sheets
-- Webhook с retry механизмом
-- Структурированные данные в JSON
-- Логирование всех операций
-
-### 📢 **Система упоминаний** *(v1.1 - Готов)*
-- Упоминания работников в Telegram
-- Интеграция с Plane для задач  
-- Групповые уведомления
-- Гибкие настройки уведомлений
+### ✅ **Production ready**  
+- 🔒 Environment variables for all secrets
+- 🔒 Docker secrets support
+- 🔒 Rate limiting configured
+- 🔒 Complete action logging
 
 ---
 
-## 📚 **Документация**
+## 📊 **System Modules**
 
-### 📖 **Основная документация**
-- [**Быстрый старт**](docs/QUICK_START.md) - Первые шаги
-- [**Руководство разработчика**](docs/DEVELOPMENT_GUIDE.md) - Детальное руководство
-- [**Production развертывание**](PRODUCTION_DEPLOYMENT.md) - Настройка продакшена
-- [**Архитектура**](ARCHITECTURE.md) - Техническая архитектура
+### 🎯 **Work Journal** *(v1.1 - Ready)*
+- Create entries through convenient interface
+- Multiple worker selection  
+- Smart work time parser
+- Entry filtering and search
+- Export in various formats
 
-### 🔧 **Интеграции**
+### 🔗 **n8n Integration** *(v1.1 - Ready)*
+- Automatic Google Sheets sync
+- Webhook with retry mechanism
+- Structured JSON data
+- Complete operation logging
+
+### 📢 **Mention System** *(v1.1 - Ready)*
+- Worker mentions in Telegram
+- Plane integration for tasks  
+- Group notifications
+- Flexible notification settings
+
+---
+
+## 📚 **Documentation**
+
+### 📖 **Main documentation**
+- [**Quick Start**](docs/QUICK_START.md) - First steps
+- [**Development Guide**](DEV_GUIDE.md) - Detailed development guide
+- [**Production Deployment**](PRODUCTION_DEPLOYMENT.md) - Production setup
+- [**Architecture**](ARCHITECTURE.md) - Technical architecture
+
+### 🔧 **Integrations**
 - [**n8n + Google Sheets**](docs/N8N_GOOGLE_SHEETS_INTEGRATION_GUIDE.md)
-- [**Plane интеграция**](docs/PLANE_INTEGRATION_WITH_MENTIONS.md)  
-- [**Система упоминаний**](docs/WORKER_MENTIONS_SYSTEM.md)
+- [**Google Sheets Integration**](docs/GOOGLE_SHEETS_INTEGRATION_GUIDE.md)
 
-### 🔐 **Безопасность**
-- [**Уведомление о безопасности**](SECURITY_NOTICE.md) - Важная информация
-- [**Политика безопасности**](SECURITY.md) - Рекомендации
+### 🔐 **Security**
+- [**Security Notice**](SECURITY_NOTICE.md) - Important information
+- [**Security Policy**](SECURITY.md) - Recommendations
 
 ---
 
-## 🛡️ **Требования**
+## 🛡️ **Requirements**
 
-### **Минимальные требования:**
+### **Minimum requirements:**
 - 🐧 **OS**: Linux/macOS/Windows + Docker
 - 🐍 **Python**: 3.11+
 - 🐳 **Docker**: 20.10+
 - 💾 **RAM**: 512MB+ 
 - 💿 **Storage**: 1GB+
 
-### **Production требования:**
+### **Production requirements:**
 - 🖥️ **VPS**: 1 vCPU, 1GB RAM, 10GB SSD
-- 🌐 **Домен**: Для webhook'ов (опционально)
-- 🔐 **SSL**: Let's Encrypt автоматически
-- 📊 **Мониторинг**: Встроенные health checks
+- 🌐 **Domain**: For webhooks (optional)
+- 🔐 **SSL**: Let's Encrypt automatically
+- 📊 **Monitoring**: Built-in health checks
 
 ---
 
-## 🤝 **Участие в разработке**
+## 🤝 **Contributing**
 
-### **Вклад приветствуется!**
-1. 🍴 Fork репозиторий
-2. 🌟 Создать feature branch
-3. 🔧 Внести изменения
-4. ✅ Добавить тесты
-5. 📝 Обновить документацию
-6. 🚀 Создать Pull Request
+### **Contributions welcome!**
+1. 🍴 Fork repository
+2. 🌟 Create feature branch
+3. 🔧 Make changes
+4. ✅ Add tests
+5. 📝 Update documentation
+6. 🚀 Create Pull Request
 
-### **Сообщить о проблеме:**
-- 🐛 [Issues](https://github.com/zarudesu/tg-modern-bot/issues) - Баги и предложения
-- 💬 [Discussions](https://github.com/zarudesu/tg-modern-bot/discussions) - Вопросы и идеи
-
----
-
-## 📜 **Лицензия**
-
-Этот проект распространяется под лицензией **MIT License**.  
-Подробности в файле [LICENSE](LICENSE).
+### **Report issues:**
+- 🐛 [Issues](https://github.com/yourusername/tg-modern-bot/issues) - Bugs and suggestions
+- 💬 [Discussions](https://github.com/yourusername/tg-modern-bot/discussions) - Questions and ideas
 
 ---
 
-## 🏆 **Статус проекта**
+## 📜 **License**
 
-**✅ Production Ready v2.0** - Готов к использованию в продакшене!
+This project is distributed under **MIT License**.  
+See [LICENSE](LICENSE) file for details.
+
+---
+
+## 🏆 **Project Status**
+
+**✅ Production Ready v2.0** - Ready for production use!
 
 ### **🎯 Roadmap v2.1:**
-- [ ] REST API для внешних интеграций
-- [ ] Веб-интерфейс администрирования  
-- [ ] Расширенная система ролей
-- [ ] Интеграция с NetBox
-- [ ] Slack/Discord поддержка
+- [ ] REST API for external integrations
+- [ ] Web administration interface  
+- [ ] Extended role system
+- [ ] NetBox integration
+- [ ] Slack/Discord support
 
 ---
 
-**🚀 Готов к использованию! Развертывайте и автоматизируйте свою IT-команду!**
+**🚀 Ready to use! Deploy and automate your team!**
 
 ---
 
-*📅 Последнее обновление: Август 2025*  
-*⭐ Поставьте звезду, если проект полезен!*
+*📅 Last update: August 2025*  
+*⭐ Star if this project is helpful!*

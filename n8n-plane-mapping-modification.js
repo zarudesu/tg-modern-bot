@@ -15,10 +15,10 @@ function mapPlaneUserToMention(fullName) {
     'Timofey Batyrev': '@spiritphoto',
     
     // Константин Макейкин
-    'Konstantin Makeykin': '@zardes',
-    'Kostya Makeykin': '@zardes', 
-    'Константин Макейкин': '@zardes',
-    'Макейкин Константин': '@zardes'
+    'Konstantin Makeykin': '@your-username',
+    'Kostya Makeykin': '@your-username', 
+    'Константин Макейкин': '@your-username',
+    'Макейкин Константин': '@your-username'
   };
   
   // Прямое соответствие
@@ -36,7 +36,7 @@ function mapPlaneUserToMention(fullName) {
       return '@spiritphoto';
     }
     if (nameLower.includes('makeykin') || nameLower.includes('макейкин') || nameLower.includes('konst')) {
-      return '@zardes';
+      return '@your-username';
     }
   }
   

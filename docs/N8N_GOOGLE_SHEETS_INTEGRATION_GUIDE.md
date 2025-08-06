@@ -182,7 +182,7 @@
 
 1. **Откройте файл `.env`** в проекте:
    ```bash
-   cd /Users/zardes/Projects/tg-mordern-bot
+   cd /Users/admin-user/Projects/tg-mordern-bot
    nano .env
    ```
 
