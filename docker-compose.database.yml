@@ -14,7 +14,7 @@ services:
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     
     ports:
-      - "5432:5432"  # Открываем порт для внешних подключений
+      - "5433:5432"  # Открываем порт для внешних подключений (5433 чтобы избежать конфликта)
     
     volumes:
       - postgres_data:/var/lib/postgresql/data

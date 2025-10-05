@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     
+    # Production Database (optional)
+    postgres_password: Optional[str] = None
+    redis_password: Optional[str] = None
+    
+    # Environment Settings
+    environment: Optional[str] = "development"
+    project_name: Optional[str] = "telegram-bot"
+    debug: Optional[bool] = True
+    enable_metrics: Optional[bool] = False
+    health_check_interval: Optional[int] = 60
+    
     # API Integrations (optional)
     # netbox_url: Optional[str] = None
     # netbox_token: Optional[str] = None
@@ -46,6 +57,23 @@ class Settings(BaseSettings):
     plane_topic_id: Optional[int] = None
     plane_webhook_secret: Optional[str] = None
     
+    # Plane API Configuration
+    plane_api_url: Optional[str] = None  # e.g., https://plane.hhivp.com
+    plane_api_token: Optional[str] = None
+    plane_workspace_slug: Optional[str] = None  # e.g., hhivp
+    
+    # Daily Tasks Settings
+    daily_tasks_enabled: bool = False
+    daily_tasks_time: str = "09:00"  # Format: HH:MM
+    daily_tasks_timezone: str = "Europe/Moscow"
+
+    # AI Configuration
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    ai_model: str = "gpt-4-turbo"  # Default AI model
+    ai_temperature: float = 0.7
+    ai_max_tokens: int = 2000
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"
@@ -53,9 +81,10 @@ class Settings(BaseSettings):
     log_retention: str = "30d"
     
     # Bot Settings
-    rate_limit_default: str = "10/minute"
-    rate_limit_search: str = "30/minute"
-    rate_limit_admin: str = "100/minute"
+    rate_limit_default: Optional[str] = "10/minute"
+    rate_limit_search: Optional[str] = "30/minute"
+    rate_limit_admin: Optional[str] = "100/minute"
+    session_timeout: Optional[int] = 3600
     
     # Security
     allowed_chat_types: List[str] = ["private", "group", "supergroup"]

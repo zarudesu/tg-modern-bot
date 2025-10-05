@@ -25,6 +25,10 @@ def create_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 История работ", callback_data="show_history")
         ],
         [
+            InlineKeyboardButton(text="✈️ Мои задачи из Plane", callback_data="daily_tasks"),
+            InlineKeyboardButton(text="⚙️ Настройки задач", callback_data="daily_settings")
+        ],
+        [
             InlineKeyboardButton(text="📈 Отчеты", callback_data="show_reports"),
             InlineKeyboardButton(text="🏢 Компании", callback_data="manage_companies")
         ],
@@ -136,6 +140,12 @@ async def start_command(message: Message, **kwargs):
         )
 
 
+# Команды отключены и перенесены в модули
+# @router.message(Command("plane_test"))
+# async def cmd_plane_test(message: Message):
+#     """Перенаправление команды /plane_test в daily_tasks - УДАЛЕНО, теперь в модулях"""
+
+
 @router.message(Command("help"))
 async def help_command(message: Message):
     """Обработчик команды /help"""
@@ -196,6 +206,31 @@ async def profile_command(message: Message):
         )
 
 
+@router.callback_query(F.data == "start_menu")
+async def callback_main_menu(callback_query: CallbackQuery):
+    """Обработчик возврата в главное меню"""
+    try:
+        user_id = callback_query.from_user.id
+        log_user_action(user_id, "main_menu")
+        
+        welcome_text = (
+            "🏠 *Главное меню*\n\n"
+            "Добро пожаловать в HHIVP IT Assistant Bot\\!\n\n"
+            "Выберите действие из меню ниже:"
+        )
+        
+        await callback_query.message.edit_text(
+            welcome_text,
+            reply_markup=create_main_menu_keyboard(),
+            parse_mode="MarkdownV2"
+        )
+        await callback_query.answer()
+        
+    except Exception as e:
+        bot_logger.error(f"Main menu callback error: {e}")
+        await callback_query.answer("❌ Ошибка при открытии меню", show_alert=True)
+
+
 @router.message(Command("ping"))
 async def ping_command(message: Message):
     """Обработчик команды /ping для проверки работоспособности"""
@@ -220,6 +255,9 @@ COMMANDS_MENU = [
     BotCommand(command="history", description="📊 История работ"),
     BotCommand(command="report", description="📈 Отчеты по работам"),
     BotCommand(command="companies", description="🏢 Управление компаниями"),
+    BotCommand(command="daily_tasks", description="✈️ Мои задачи из Plane"),
+    BotCommand(command="daily_settings", description="⚙️ Настройки ежедневных уведомлений"),
+    BotCommand(command="plane_test", description="🧪 Тест подключения к Plane"),
 ]
 
 
@@ -228,62 +266,179 @@ COMMANDS_MENU = [
 async def callback_start_journal(callback: CallbackQuery):
     """Обработчик кнопки 'Создать запись'"""
     await callback.answer()
-    # Создаем правильный объект message для обработчика
-    from aiogram.types import User
-    fake_message = type('FakeMessage', (), {
-        'from_user': callback.from_user,
-        'answer': callback.message.answer,
-        'text': '/journal'
-    })()
     
-    # Импортируем и вызываем обработчик журнала
-    from .work_journal import start_journal_entry
-    await start_journal_entry(fake_message)
+    try:
+        user_id = callback.from_user.id
+        log_user_action(user_id, "start_journal")
+        
+        async for session in get_async_session():
+            from ..services.work_journal_service import WorkJournalService
+            from ..utils.work_journal_constants import WorkJournalState, MESSAGE_TEMPLATES, EMOJI
+            from ..utils.work_journal_keyboards import create_continue_keyboard
+            from ..utils.work_journal_formatters import escape_markdown_v2, format_date_for_display
+            from datetime import date
+            
+            service = WorkJournalService(session)
+            
+            # Очищаем предыдущее состояние и устанавливаем начальное
+            await service.set_user_state(
+                user_id,
+                WorkJournalState.SELECTING_DATE,
+                draft_date=date.today()  # По умолчанию сегодняшняя дата
+            )
+            
+            # Отправляем стартовое сообщение
+            start_text = (
+                f"{MESSAGE_TEMPLATES['start_entry']}\n\n"
+                f"{EMOJI['date']} *Дата:* {escape_markdown_v2(format_date_for_display(date.today()))}"
+            )
+            
+            await callback.message.answer(
+                start_text,
+                reply_markup=create_continue_keyboard(),
+                parse_mode="MarkdownV2"
+            )
+            
+    except Exception as e:
+        bot_logger.error(f"Error starting journal entry for user {user_id}: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2"
+        )
 
 
 @router.callback_query(F.data == "show_history")
 async def callback_show_history(callback: CallbackQuery):
     """Обработчик кнопки 'История работ'"""
     await callback.answer()
-    # Создаем правильный объект message для обработчика
-    fake_message = type('FakeMessage', (), {
-        'from_user': callback.from_user,
-        'answer': callback.message.answer,
-        'text': '/history'
-    })()
     
-    from .work_journal import show_work_history
-    await show_work_history(fake_message)
+    try:
+        user_id = callback.from_user.id
+        log_user_action(user_id, "view_history")
+        
+        async for session in get_async_session():
+            from ..services.work_journal_service import WorkJournalService
+            from ..utils.work_journal_formatters import format_entries_list, format_error_message
+            from ..utils.work_journal_keyboards import create_history_menu_keyboard
+            from ..utils.work_journal_constants import EMOJI
+            
+            service = WorkJournalService(session)
+            
+            # Получаем последние 10 записей пользователя
+            entries = await service.get_work_entries(
+                telegram_user_id=user_id,
+                limit=10
+            )
+            
+            if entries:
+                text = format_entries_list(entries, "Последние записи")
+            else:
+                text = f"*{EMOJI['history']} История работ*\n\nУ вас пока нет записей\\. Создайте первую запись командой /journal\\."
+            
+            await callback.message.answer(
+                text,
+                reply_markup=create_history_menu_keyboard(),
+                parse_mode="MarkdownV2"
+            )
+            
+    except Exception as e:
+        bot_logger.error(f"Error showing work history for user {user_id}: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2"
+        )
 
 
 @router.callback_query(F.data == "show_reports")
 async def callback_show_reports(callback: CallbackQuery):
     """Обработчик кнопки 'Отчеты'"""
     await callback.answer()
-    # Создаем правильный объект message для обработчика
-    fake_message = type('FakeMessage', (), {
-        'from_user': callback.from_user,
-        'answer': callback.message.answer,
-        'text': '/report'
-    })()
     
-    from .work_journal import show_work_report
-    await show_work_report(fake_message)
+    try:
+        user_id = callback.from_user.id
+        log_user_action(user_id, "view_reports")
+        
+        async for session in get_async_session():
+            from ..services.work_journal_service import WorkJournalService
+            from ..utils.work_journal_formatters import format_statistics_report, format_error_message
+            from ..utils.work_journal_keyboards import create_report_menu_keyboard
+            from datetime import date, timedelta
+            
+            service = WorkJournalService(session)
+            
+            # Получаем статистику за последнюю неделю
+            week_ago = date.today() - timedelta(days=7)
+            stats = await service.get_statistics(
+                telegram_user_id=user_id,
+                date_from=week_ago
+            )
+            
+            report_text = format_statistics_report(stats, "Отчет за неделю")
+            
+            await callback.message.answer(
+                report_text,
+                reply_markup=create_report_menu_keyboard(),
+                parse_mode="MarkdownV2"
+            )
+            
+    except Exception as e:
+        bot_logger.error(f"Error showing work reports for user {user_id}: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2"
+        )
 
 
 @router.callback_query(F.data == "manage_companies")
 async def callback_manage_companies(callback: CallbackQuery):
     """Обработчик кнопки 'Компании'"""
     await callback.answer()
-    # Создаем правильный объект message для обработчика
-    fake_message = type('FakeMessage', (), {
-        'from_user': callback.from_user,
-        'answer': callback.message.answer,
-        'text': '/companies'
-    })()
     
-    from .work_journal import manage_companies
-    await manage_companies(fake_message)
+    try:
+        user_id = callback.from_user.id
+        log_user_action(user_id, "manage_companies")
+        
+        async for session in get_async_session():
+            from ..services.work_journal_service import WorkJournalService
+            from ..utils.work_journal_formatters import escape_markdown_v2
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            
+            service = WorkJournalService(session)
+            
+            # Получаем список всех компаний
+            companies = await service.get_companies()
+            
+            if not companies:
+                await callback.message.answer(
+                    "🏢 *Список компаний пуст*\n\nВы можете добавить компании при создании записей в журнале работ\\.",
+                    parse_mode="MarkdownV2"
+                )
+                return
+            
+            # Формируем текст со списком компаний
+            companies_text = "🏢 **Список компаний:**\n\n"
+            
+            for i, company in enumerate(companies, 1):
+                companies_text += f"{i}\\. {escape_markdown_v2(company)}\n"
+            
+            companies_text += f"\n**Всего компаний:** {len(companies)}\n\n"
+            companies_text += "Для удаления используйте:\n"
+            companies_text += "`/delete_company Название`"
+            
+            # Создаем клавиатуру для управления
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад в меню", callback_data="show_main_menu")]
+            ])
+            
+            await callback.message.answer(
+                companies_text,
+                reply_markup=keyboard,
+                parse_mode="MarkdownV2"
+            )
+            
+    except Exception as e:
+        bot_logger.error(f"Error managing companies for user {user_id}: {e}")
+        await callback.message.answer("❌ Произошла ошибка при получении списка компаний\\.", parse_mode="MarkdownV2")
 
 
 @router.callback_query(F.data == "show_help")
@@ -336,5 +491,126 @@ async def callback_show_profile(callback: CallbackQuery):
         bot_logger.error(f"Profile callback error: {e}")
         await callback.message.answer(
             "❌ Ошибка при получении профиля\\.",
+            parse_mode="MarkdownV2"
+        )
+
+
+@router.callback_query(F.data == "daily_tasks")
+async def callback_daily_tasks(callback: CallbackQuery):
+    """Обработчик кнопки 'Мои задачи из Plane'"""
+    await callback.answer()
+    
+    # Проверяем права админа
+    user_id = callback.from_user.id
+    if not settings.is_admin(user_id):
+        await callback.message.answer("❌ У вас нет прав для просмотра задач Plane")
+        return
+    
+    # Перенаправляем на команду daily_tasks
+    from ..modules.daily_tasks.handlers import cmd_daily_tasks
+    
+    # Создаем фиктивное сообщение для обработчика
+    fake_message = type('FakeMessage', (), {
+        'from_user': callback.from_user,
+        'reply': callback.message.answer,
+        'answer': callback.message.answer
+    })()
+    
+    await cmd_daily_tasks(fake_message)
+
+
+@router.callback_query(F.data == "show_main_menu")
+async def callback_show_main_menu(callback: CallbackQuery):
+    """Обработчик возврата в главное меню"""
+    await callback.answer()
+    
+    try:
+        user_id = callback.from_user.id
+        
+        async for session in get_async_session():
+            user = await get_or_create_user(session, type('FakeMessage', (), {
+                'from_user': callback.from_user
+            })())
+            
+            if not user:
+                return
+            
+            username = escape_markdown(user.first_name or "Администратор")
+            
+            welcome_text = f"👋 *{username}*\\!\n\n"
+            welcome_text += (
+                "🤖 Я *HHIVP IT Assistant Bot* \\- ваш помощник по управлению IT\\-работами\\.\n\n"
+                "💡 *Выберите действие из меню ниже или используйте команды\\.*"
+            )
+            
+            await callback.message.edit_text(
+                welcome_text, 
+                parse_mode="MarkdownV2",
+                reply_markup=create_main_menu_keyboard()
+            )
+            
+    except Exception as e:
+        bot_logger.error(f"Error showing main menu: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2"
+        )
+
+
+@router.callback_query(F.data == "sheets_sync_menu")
+async def callback_sheets_sync_menu(callback: CallbackQuery):
+    """Обработчик кнопки 'Синхронизация Google Sheets'"""
+    await callback.answer()
+    
+    try:
+        # Перенаправляем на команду из google_sheets_sync
+        from ..handlers.google_sheets_sync import cmd_sheets_sync_menu
+        
+        # Создаем фиктивное сообщение для обработчика
+        fake_message = type('FakeMessage', (), {
+            'from_user': callback.from_user,
+            'reply': callback.message.answer,
+            'answer': callback.message.answer
+        })()
+        
+        await cmd_sheets_sync_menu(fake_message)
+        
+    except Exception as e:
+        bot_logger.error(f"Error in sheets sync menu: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка при открытии меню синхронизации\\.",
+            parse_mode="MarkdownV2"
+        )
+
+
+
+@router.callback_query(F.data == "daily_settings")
+async def callback_daily_settings(callback: CallbackQuery):
+    """Обработчик кнопки 'Настройки задач'"""
+    await callback.answer()
+    
+    # Проверяем права админа
+    user_id = callback.from_user.id
+    if not settings.is_admin(user_id):
+        await callback.message.answer("❌ У вас нет прав для настройки задач Plane")
+        return
+    
+    try:
+        # Перенаправляем на команду daily_settings
+        from ..modules.daily_tasks.handlers import cmd_daily_settings
+        
+        # Создаем фиктивное сообщение для обработчика
+        fake_message = type('FakeMessage', (), {
+            'from_user': callback.from_user,
+            'reply': callback.message.answer,
+            'answer': callback.message.answer
+        })()
+        
+        await cmd_daily_settings(fake_message)
+        
+    except Exception as e:
+        bot_logger.error(f"Error in daily settings: {e}")
+        await callback.message.answer(
+            "❌ Произошла ошибка при открытии настроек\\\\.",
             parse_mode="MarkdownV2"
         )

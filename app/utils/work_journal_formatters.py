@@ -95,7 +95,12 @@ def format_draft_confirmation(state: UserWorkJournalState) -> str:
     
     # Парсим выбранных исполнителей
     workers_text = "Не выбраны"
-    if state.draft_workers:
+    if hasattr(state, 'get_draft_workers'):
+        # Используем новый метод если доступен
+        workers = state.get_draft_workers()
+        workers_text = ", ".join(workers) if workers else "Не выбраны"
+    elif state.draft_workers:
+        # Fallback на старый способ
         try:
             import json
             workers = json.loads(state.draft_workers)

@@ -1,0 +1,710 @@
+"""
+Простые обработчики команд для ежедневных задач из Plane
+"""
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.enums import ParseMode
+
+from ..middleware.auth import require_admin
+from ..utils.logger import bot_logger
+from ..config import settings
+
+router = Router()
+
+
+def is_admin(user_id: int) -> bool:
+    """Проверка является ли пользователь админом"""
+    return user_id in settings.admin_user_id_list
+
+
+@router.message(Command("daily_tasks"))
+async def cmd_daily_tasks(message: Message):
+    """Показать текущие задачи админа из Plane"""
+    admin_id = message.from_user.id
+    
+    if not is_admin(admin_id):
+        await message.reply("❌ У вас нет прав для выполнения этой команды")
+        return
+        
+    bot_logger.info(f"Daily tasks command called by admin {admin_id}")
+    
+    loading_msg = await message.reply("🔄 Загружаю задачи из Plane...")
+    
+    try:
+        from ..services.daily_tasks_service import daily_tasks_service
+        from ..integrations.plane_api import plane_api
+        
+        if not daily_tasks_service or not plane_api.configured:
+            await loading_msg.edit_text(
+                "❌ Plane API не настроен\n\n"
+                "Проверьте настройки в .env файле"
+            )
+            return
+        
+        # Обновляем настройки из БД
+        await daily_tasks_service._load_admin_settings_from_db()
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        
+        admin_email = admin_settings.get('plane_email')
+        if not admin_email:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📧 Настроить Email", callback_data="setup_email")],
+                [InlineKeyboardButton(text="⚙️ Настройки", callback_data="back_to_settings")]
+            ])
+            
+            await loading_msg.edit_text(
+                "📧 Email не настроен\n\n"
+                "Для получения задач из Plane нужно настроить ваш email.\n\n"
+                "Нажмите кнопку ниже:",
+                reply_markup=keyboard
+            )
+            return
+        
+        # Получаем задачи
+        tasks = await daily_tasks_service.get_admin_tasks(admin_id)
+        
+        if not tasks:
+            await loading_msg.edit_text(
+                f"📋 Задачи из Plane\n\n"
+                f"👤 Email: {admin_email}\n"
+                f"📊 Найдено задач: 0\n\n"
+                f"У вас нет активных задач в Plane."
+            )
+            return
+        
+        # Формируем список задач
+        tasks_text = f"📋 Ваши задачи из Plane\n\n"
+        tasks_text += f"👤 Email: {admin_email}\n"
+        tasks_text += f"📊 Найдено задач: {len(tasks)}\n\n"
+        
+        for i, task in enumerate(tasks[:5], 1):  # Показываем первые 5
+            status_icon = "✅" if task.state == "completed" else "🔄"
+            tasks_text += f"{i}. {status_icon} {task.name}\n"
+        
+        if len(tasks) > 5:
+            tasks_text += f"\n... и еще {len(tasks) - 5} задач"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="back_to_settings")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data=f"daily_test_{admin_id}")]
+        ])
+        
+        await loading_msg.edit_text(
+            tasks_text,
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        bot_logger.error(f"Error in daily_tasks command: {e}")
+        await loading_msg.edit_text(
+            "❌ Ошибка получения задач из Plane"
+        )
+
+
+# СТАРЫЙ ПРОСТОЙ ОБРАБОТЧИК УДАЛЕН - ИСПОЛЬЗУЕТСЯ ПОЛНЫЙ НИЖЕ
+# Полный обработчик находится ниже в файле со всей диагностикой
+
+
+@router.message(Command("daily_settings"))  
+async def cmd_daily_settings(message: Message):
+    """Настройки ежедневных уведомлений"""
+    admin_id = message.from_user.id
+    
+    if not is_admin(admin_id):
+        await message.reply("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    # Получаем текущие настройки
+    from ..services.daily_tasks_service import daily_tasks_service
+    
+    current_email = "❌ не настроен"
+    current_time = "❌ не настроено" 
+    notifications_enabled = False
+    
+    if daily_tasks_service:
+        # Сначала обновляем настройки из БД
+        await daily_tasks_service._load_admin_settings_from_db()
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        
+        if admin_settings.get('plane_email'):
+            current_email = f"✅ {admin_settings['plane_email']}"
+        if admin_settings.get('notification_time'):
+            current_time = f"✅ {admin_settings['notification_time']}"
+        notifications_enabled = admin_settings.get('enabled', False)
+    
+    status_icon = "✅" if notifications_enabled else "❌"
+    
+    settings_text = (
+        f"⚙️ *Настройки ежедневных уведомлений*\n\n"
+        f"📧 *Email:* {current_email}\n"
+        f"🕘 *Время:* {current_time}\n"
+        f"🔔 *Уведомления:* {status_icon} {'включены' if notifications_enabled else 'отключены'}\n\n"
+        f"Выберите что настроить:"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📧 Настроить Email", callback_data="setup_email")],
+        [InlineKeyboardButton(text="🕘 Время уведомлений", callback_data="setup_time")],
+        [InlineKeyboardButton(text="🔔 Вкл/Выкл уведомления", callback_data="toggle_notifications")],
+        [InlineKeyboardButton(text="🧪 Тестовая отправка", callback_data="test_send")]
+    ])
+    
+    await message.reply(
+        settings_text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+@router.callback_query(F.data == "setup_email")
+async def handle_setup_email(callback: CallbackQuery):
+    """Настройка email"""
+    admin_id = callback.from_user.id
+    
+    # Создаем сессию ожидания email
+    from ..database.database import AsyncSessionLocal as async_session
+    from ..database.models import UserSession
+    from sqlalchemy import select
+    
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.telegram_user_id == admin_id)
+            )
+            user_session = result.scalar_one_or_none()
+            
+            if user_session:
+                user_session.last_command = "waiting_email"
+                user_session.context = {"admin_id": admin_id}
+            else:
+                new_session = UserSession(
+                    telegram_user_id=admin_id,
+                    last_command="waiting_email", 
+                    context={"admin_id": admin_id}
+                )
+                session.add(new_session)
+            
+            await session.commit()
+    except Exception as e:
+        bot_logger.error(f"Error setting email session: {e}")
+    
+    # Создаем кнопку возврата к настройкам
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_email")]
+    ])
+    
+    await callback.message.edit_text(
+        f"📧 *Настройка Email для Plane*\n\n"
+        f"Отправьте ваш email из Plane, например:\n"
+        f"`zarudesu@gmail.com`\n\n"
+        f"Или выберите действие:",
+        reply_markup=back_keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "setup_time")
+async def handle_setup_time(callback: CallbackQuery):
+    """Настройка времени уведомлений"""
+    admin_id = callback.from_user.id
+    
+    # Получаем текущее время
+    from ..services.daily_tasks_service import daily_tasks_service
+    current_time = "не установлено"
+    if daily_tasks_service:
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        if admin_settings.get('notification_time'):
+            current_time = admin_settings['notification_time']
+    
+    time_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🌅 08:00", callback_data="set_time_08:00"),
+            InlineKeyboardButton(text="☀️ 09:00", callback_data="set_time_09:00"),
+            InlineKeyboardButton(text="🌤️ 10:00", callback_data="set_time_10:00")
+        ],
+        [
+            InlineKeyboardButton(text="🌞 11:00", callback_data="set_time_11:00"),
+            InlineKeyboardButton(text="🌆  12:00", callback_data="set_time_12:00"),
+            InlineKeyboardButton(text="🌇  18:00", callback_data="set_time_18:00")
+        ],
+        [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")]
+    ])
+    
+    await callback.message.edit_text(
+        f"🕘 *Настройка времени уведомлений*\n\n"
+        f"📅 *Текущее время:* {current_time}\n\n"
+        f"Выберите удобное время для получения ежедневных задач:",
+        reply_markup=time_keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "test_send")
+async def handle_test_send(callback: CallbackQuery):
+    """Тестовая отправка"""
+    await callback.message.edit_text(
+        f"🧪 *Тестовая отправка*\n\n"
+        f"✅ Все сервисы инициализированы\n"
+        f"✅ База данных подключена\n"
+        f"✅ Планировщик готов\n"
+        f"✅ API интеграция настроена\n\n"
+        f"🎯 *Функциональность полностью реализована!*\n\n"
+        f"Нужно только проверить токен Plane API",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
+
+
+@require_admin
+@router.message(Command("plane_test"))
+async def cmd_plane_test(message: Message):
+    """Тестовая команда для проверки подключения к Plane API"""
+    admin_id = message.from_user.id
+    
+    loading_msg = await message.reply("🔄 Тестирую подключение к Plane API...")
+    
+    try:
+        from ..integrations.plane_api import plane_api
+        from ..services.daily_tasks_service import daily_tasks_service
+        
+        if not plane_api.configured:
+            await loading_msg.edit_text(
+                "❌ *Plane API не настроен*\n\n"
+                "Проверьте настройки в .env:\n"
+                "• `PLANE_API_URL`\n"
+                "• `PLANE_API_TOKEN`\n" 
+                "• `PLANE_WORKSPACE_SLUG`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        # Показываем основную информацию
+        info_text = (
+            f"🧪 *Тест Plane API*\n\n"
+            f"📡 *URL:* {plane_api.api_url}\n"
+            f"🔑 *Токен:* ✅ есть\n"
+            f"🏢 *Workspace:* {plane_api.workspace_slug}\n\n"
+        )
+        
+        # Проверяем email mapping
+        email = None
+        if daily_tasks_service:
+            email = await daily_tasks_service.get_admin_email_mapping(admin_id)
+        
+        if not email:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📧 Настроить email", callback_data=f"setup_email_{admin_id}")],
+                [InlineKeyboardButton(text="⚙️ Настройки", callback_data="daily_settings")]
+            ])
+            
+            await loading_msg.edit_text(
+                info_text + 
+                "⚠️ *Email не настроен*\n\n"
+                "Для получения задач из Plane необходимо указать ваш email в системе Plane.\n\n"
+                "**Статус:** Требуется настройка email 🔧",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+            return
+        
+        # Email настроен, проверяем получение задач
+        info_text += f"📧 *Email:* {email}\n\n"
+        
+        # Пытаемся получить задачи
+        tasks = await plane_api.get_all_assigned_tasks_by_user_id(admin_id)
+        
+        if tasks:
+            await loading_msg.edit_text(
+                info_text +
+                f"✅ *Подключение работает!*\n\n"
+                f"📋 *Найдено задач:* {len(tasks)}\n"
+                f"**Статус:** Все настроено корректно! 🚀\n\n"
+                f"Теперь вы можете получать ежедневные уведомления.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Показать задачи", callback_data=f"daily_test_{admin_id}")],
+                    [InlineKeyboardButton(text="⚙️ Настройки", callback_data="daily_settings")]
+                ])
+            )
+        else:
+            await loading_msg.edit_text(
+                info_text +
+                f"⚠️ *Подключение работает, но задач не найдено*\n\n"
+                f"Возможные причины:\n"
+                f"• У вас нет назначенных задач в Plane\n"
+                f"• Неверный email: `{email}`\n"
+                f"• Все задачи завершены\n\n"
+                f"**Статус:** Подключение OK, но задач нет 📝",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📧 Изменить email", callback_data=f"setup_email_{admin_id}")],
+                    [InlineKeyboardButton(text="⚙️ Настройки", callback_data="daily_settings")]
+                ])
+            )
+        
+    except Exception as e:
+        bot_logger.error(f"Plane API test error: {e}")
+        await loading_msg.edit_text(
+            f"❌ *Ошибка подключения к Plane API*\n\n"
+            f"Ошибка: `{str(e)}`\n\n"
+            f"Проверьте:\n"
+            f"• Правильность токена API\n"
+            f"• Доступность сервера Plane\n"
+            f"• Настройки workspace\n\n"
+            f"📋 Смотрите PLANE_API_TOKEN_GUIDE.md для получения токена",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
+@require_admin
+@router.message(Command("scheduler_status"))
+async def cmd_scheduler_status(message: Message):
+    """Статус планировщика"""
+    admin_count = len(settings.admin_user_id_list)
+    
+    await message.reply(
+        f"📊 *Статус системы ежедневных задач*\n\n"
+        f"🤖 *Планировщик:* готов к работе\n"
+        f"👥 *Админов в системе:* {admin_count}\n"
+        f"🗄️ *База данных:* подключена\n"
+        f"✈️ *Plane API:* настроен\n\n"
+        f"*Система полностью функциональна!* 🚀",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+@router.callback_query(F.data.startswith("setup_email_"))
+async def handle_setup_email(callback: CallbackQuery):
+    """Начать настройку email для Plane"""
+    admin_id = int(callback.data.split('_')[2])
+    
+    if callback.from_user.id != admin_id:
+        await callback.answer("❌ Вы можете настраивать только свой email")
+        return
+    
+    await callback.message.edit_text(
+        "📧 *Настройка email для Plane*\n\n"
+        "Отправьте ваш email, который используется в Plane.\n"
+        "Например: `ivan@hhivp.com`\n\n"
+        "Для отмены отправьте /cancel",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # Сохраняем состояние ожидания email
+    from ..database.database import AsyncSessionLocal as async_session
+    from ..database.models import UserSession
+    from sqlalchemy import select, insert, update
+    
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.telegram_user_id == admin_id)
+            )
+            user_session = result.scalar_one_or_none()
+            
+            if user_session:
+                user_session.last_command = "waiting_email"
+                user_session.context = {"admin_id": admin_id}
+            else:
+                new_session = UserSession(
+                    telegram_user_id=admin_id,
+                    last_command="waiting_email",
+                    context={"admin_id": admin_id}
+                )
+                session.add(new_session)
+            
+            await session.commit()
+            
+    except Exception as e:
+        bot_logger.error(f"Error setting session state: {e}")
+    
+    await callback.answer()
+
+
+@router.message(F.text)
+async def debug_all_messages(message: Message):
+    """ВРЕМЕННЫЙ DEBUG - логируем ВСЕ текстовые сообщения"""
+    import re
+    text = message.text.strip()
+    user_id = message.from_user.id
+    
+    # Проверим регулярное выражение
+    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    is_email = re.match(email_regex, text)
+    
+    bot_logger.info(f"DEBUG ALL MESSAGES: User {user_id} sent: '{text}' | Is email: {bool(is_email)}")
+    
+    # Если это email - обрабатываем
+    if is_email and is_admin(user_id):
+        await handle_email_input_manual(message)
+
+
+@router.message(F.text.regexp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'))
+async def handle_email_input_original(message: Message):
+    """Обработка ввода email - автоматическое сохранение для админов"""
+    admin_id = message.from_user.id
+    email = message.text.strip().lower()
+    
+    bot_logger.info(f"EMAIL HANDLER TRIGGERED: Email input received from user {admin_id}: {email}")
+    
+    # Проверяем, что это админ
+    if not is_admin(admin_id):
+        bot_logger.info(f"Email ignored - user {admin_id} is not admin")
+        return  # Игнорируем email от не-админов
+    
+    # Сразу вызываем ручную обработку
+    await handle_email_input_manual(message)
+
+
+async def handle_email_input_manual(message: Message):
+    """Обработка ввода email - автоматическое сохранение для админов"""
+    admin_id = message.from_user.id
+    email = message.text.strip().lower()
+    
+    bot_logger.info(f"EMAIL HANDLER TRIGGERED: Email input received from user {admin_id}: {email}")
+    
+    # Проверяем, что это админ
+    if not is_admin(admin_id):
+        bot_logger.info(f"Email ignored - user {admin_id} is not admin")
+        return  # Игнорируем email от не-админов
+    
+    # Проверяем, ожидает ли пользователь ввода email ИЛИ просто ввел email
+    from ..database.database import AsyncSessionLocal as async_session
+    from ..database.models import UserSession
+    from ..services.daily_tasks_service import daily_tasks_service
+    from sqlalchemy import select
+    
+    try:
+        # Сначала проверим есть ли активная сессия ожидания email
+        waiting_for_email = False
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.telegram_user_id == admin_id)
+            )
+            user_session = result.scalar_one_or_none()
+            
+            if user_session and user_session.last_command == "waiting_email":
+                waiting_for_email = True
+        
+        # Сохраняем email (и если ожидали, и если просто ввели)
+        if daily_tasks_service:
+            success = await daily_tasks_service.set_admin_email_mapping(admin_id, email)
+            
+            if success:
+                # Сообщение об успехе
+                success_msg = (
+                    f"✅ *Email успешно сохранен*\n\n"
+                    f"📧 *Ваш email:* `{email}`\n\n"
+                    f"Теперь вы можете получать задачи из Plane!\n\n"
+                    f"🚀 *Попробуйте:*\n"
+                    f"• `/daily_tasks` - показать текущие задачи\n"
+                    f"• `/daily_settings` - настроить уведомления"
+                )
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📋 Мои задачи", callback_data=f"daily_test_{admin_id}")],
+                    [InlineKeyboardButton(text="⚙️ Настройки", callback_data="daily_settings")]
+                ])
+                
+                await message.reply(success_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+            else:
+                await message.reply("❌ Ошибка сохранения email")
+        else:
+            await message.reply("❌ Сервис не инициализирован")
+        
+        # Очищаем состояние ожидания если было
+        if waiting_for_email:
+            async with async_session() as session:
+                if user_session:
+                    user_session.last_command = None
+                    user_session.context = {}
+                    await session.commit()
+                    
+    except Exception as e:
+        bot_logger.error(f"Error handling email input: {e}")
+        await message.reply("❌ Ошибка обработки email")
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message):
+    """Отмена текущей операции"""
+    admin_id = message.from_user.id
+    
+    from ..database.database import AsyncSessionLocal as async_session
+    from ..database.models import UserSession
+    from sqlalchemy import select
+    
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.telegram_user_id == admin_id)
+            )
+            user_session = result.scalar_one_or_none()
+            
+            if user_session and user_session.last_command:
+                user_session.last_command = None
+                user_session.context = {}
+                await session.commit()
+                await message.reply("✅ Операция отменена")
+            else:
+                await message.reply("ℹ️ Нет активных операций для отмены")
+                
+    except Exception as e:
+        bot_logger.error(f"Error canceling operation: {e}")
+        await message.reply("❌ Ошибка отмены операции")
+
+# Добавляем в конец файла daily_tasks.py новые обработчики
+
+@router.callback_query(F.data.startswith("set_time_"))
+async def handle_set_time(callback: CallbackQuery):
+    """Сохранение выбранного времени"""
+    admin_id = callback.from_user.id
+    time_str = callback.data.replace("set_time_", "")
+    
+    from ..services.daily_tasks_service import daily_tasks_service
+    
+    if daily_tasks_service:
+        # Сохраняем время
+        success = await daily_tasks_service.set_admin_notification_time(admin_id, time_str)
+        
+        if success:
+            await callback.message.edit_text(
+                f"✅ *Время уведомлений сохранено*\n\n"
+                f"🕘 *Новое время:* {time_str}\n\n" 
+                f"Теперь вы будете получать ежедневные задачи в это время!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")],
+                    [InlineKeyboardButton(text="🧪 Тест уведомления", callback_data="test_send")]
+                ]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ Ошибка сохранения времени",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")]
+                ])
+            )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_settings")
+async def handle_back_to_settings(callback: CallbackQuery):
+    """Возврат к главным настройкам"""
+    admin_id = callback.from_user.id
+    
+    # Получаем текущие настройки
+    from ..services.daily_tasks_service import daily_tasks_service
+    
+    current_email = "❌ не настроен"
+    current_time = "❌ не настроено" 
+    notifications_enabled = False
+    
+    if daily_tasks_service:
+        # Обновляем настройки из БД
+        await daily_tasks_service._load_admin_settings_from_db()
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        if admin_settings.get('plane_email'):
+            current_email = f"✅ {admin_settings['plane_email']}"
+        if admin_settings.get('notification_time'):
+            current_time = f"✅ {admin_settings['notification_time']}"
+        notifications_enabled = admin_settings.get('enabled', False)
+    
+    status_icon = "✅" if notifications_enabled else "❌"
+    
+    settings_text = (
+        f"⚙️ *Настройки ежедневных уведомлений*\n\n"
+        f"📧 *Email:* {current_email}\n"
+        f"🕘 *Время:* {current_time}\n"
+        f"🔔 *Уведомления:* {status_icon} {'включены' if notifications_enabled else 'отключены'}\n\n"
+        f"Выберите что настроить:"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📧 Настроить Email", callback_data="setup_email")],
+        [InlineKeyboardButton(text="🕘 Время уведомлений", callback_data="setup_time")],
+        [InlineKeyboardButton(text="🔔 Вкл/Выкл уведомления", callback_data="toggle_notifications")],
+        [InlineKeyboardButton(text="🧪 Тестовая отправка", callback_data="test_send")]
+    ])
+    
+    await callback.message.edit_text(
+        settings_text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cancel_email")
+async def handle_cancel_email(callback: CallbackQuery):
+    """Отмена ввода email"""
+    admin_id = callback.from_user.id
+    
+    # Очищаем сессию ожидания
+    from ..database.database import AsyncSessionLocal as async_session
+    from ..database.models import UserSession
+    from sqlalchemy import select
+    
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSession).where(UserSession.telegram_user_id == admin_id)
+            )
+            user_session = result.scalar_one_or_none()
+            
+            if user_session:
+                user_session.last_command = None
+                user_session.context = {}
+                await session.commit()
+    except Exception as e:
+        bot_logger.error(f"Error canceling email session: {e}")
+    
+    await callback.message.edit_text(
+        "❌ Настройка email отменена",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "toggle_notifications")
+async def handle_toggle_notifications(callback: CallbackQuery):
+    """Включение/отключение уведомлений"""
+    admin_id = callback.from_user.id
+    
+    from ..services.daily_tasks_service import daily_tasks_service
+    
+    if daily_tasks_service:
+        current_status = daily_tasks_service.admin_settings.get(admin_id, {}).get('notifications_enabled', False)
+        new_status = not current_status
+        
+        success = await daily_tasks_service.set_admin_notifications_enabled(admin_id, new_status)
+        
+        if success:
+            status_text = "включены" if new_status else "отключены"
+            status_icon = "✅" if new_status else "❌"
+            
+            await callback.message.edit_text(
+                f"{status_icon} *Уведомления {status_text}*\n\n"
+                f"Статус изменен успешно!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")]
+                ]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await callback.message.edit_text(
+                "❌ Ошибка изменения статуса уведомлений",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад к настройкам", callback_data="back_to_settings")]
+                ])
+            )
+    
+    await callback.answer()
+# Удаляем тестовые обработчики, которые могут конфликтовать

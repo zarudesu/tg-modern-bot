@@ -238,14 +238,14 @@ def create_worker_selection_keyboard(workers: List[str], selected_workers: List[
 def create_confirmation_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для подтверждения записи"""
     builder = InlineKeyboardBuilder()
-    
+
     builder.row(
         InlineKeyboardButton(
             text=f"{EMOJI['check']} Сохранить",
             callback_data=build_callback_data(CallbackAction.CONFIRM_SAVE)
         )
     )
-    
+
     builder.row(
         InlineKeyboardButton(
             text=f"{EMOJI['edit']} Редактировать",
@@ -256,7 +256,14 @@ def create_confirmation_keyboard() -> InlineKeyboardMarkup:
             callback_data=build_callback_data(CallbackAction.CANCEL)
         )
     )
-    
+
+    builder.row(
+        InlineKeyboardButton(
+            text="🏠 Главное меню",
+            callback_data="show_main_menu"
+        )
+    )
+
     return builder.as_markup()
 
 
@@ -325,6 +332,14 @@ def create_history_menu_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text=f"{EMOJI['remote']} Только удаленка",
             callback_data=build_callback_data(CallbackAction.FILTER_REMOTE)
+        )
+    )
+    
+    # Кнопка "Назад"
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{EMOJI['back']} Назад",
+            callback_data="show_main_menu"
         )
     )
     
@@ -413,25 +428,5 @@ def create_continue_keyboard() -> InlineKeyboardMarkup:
 
 
 def create_description_input_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для ввода описания работ с кнопкой Далее"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(
-            text="➡️ Далее",
-            callback_data=build_callback_data(CallbackAction.CONTINUE)
-        )
-    )
-    
-    builder.row(
-        InlineKeyboardButton(
-            text="⬅️ Назад",
-            callback_data=build_callback_data(CallbackAction.BACK)
-        ),
-        InlineKeyboardButton(
-            text="❌ Отмена",
-            callback_data=build_callback_data(CallbackAction.CANCEL)
-        )
-    )
-    
-    return builder.as_markup()
+    """Клавиатура для ввода описания работ - просто Назад/Отмена"""
+    return create_back_cancel_keyboard()

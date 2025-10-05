@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем код приложения
 COPY app/ ./app/
 COPY sql/ ./sql/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 # Создаем необходимые директории
 RUN mkdir -p logs backups

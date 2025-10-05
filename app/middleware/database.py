@@ -20,6 +20,10 @@ class DatabaseSessionMiddleware(BaseMiddleware):
     ) -> Any:
         """Создает одну сессию для всего request lifecycle"""
         
+        # Проверяем, не создана ли уже сессия
+        if 'db_session' in data:
+            return await handler(event, data)
+        
         async for session in get_async_session():
             try:
                 # Добавляем сессию в data для использования в других middleware и handlers

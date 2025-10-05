@@ -87,9 +87,9 @@ class WorkerMentionService:
         # Добавляем ссылку на Google Sheets если настроена
         if settings.google_sheets_url:
             message += f"📊 [Google Sheets]({settings.google_sheets_url})\n\n"
-        
-        message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
+
+        message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
         return message
     
     async def send_work_assignment_notifications(

@@ -180,3 +180,17 @@ def user_required(handler):
             return
         return await handler(event, *args, **kwargs)
     return wrapper
+
+
+def require_admin(handler):
+    """Декоратор для команд, доступных только администраторам"""
+    async def wrapper(event: Message, *args, **kwargs):
+        user_id = event.from_user.id
+        if not settings.is_admin(user_id):
+            await event.reply(
+                "❌ У вас нет прав для выполнения этой команды. "
+                "Команда доступна только администраторам."
+            )
+            return
+        return await handler(event, *args, **kwargs)
+    return wrapper

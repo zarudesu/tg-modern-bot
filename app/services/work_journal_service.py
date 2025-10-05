@@ -35,7 +35,32 @@ class WorkJournalService:
             select(UserWorkJournalState)
             .where(UserWorkJournalState.telegram_user_id == telegram_user_id)
         )
-        return result.scalar_one_or_none()
+        state = result.scalar_one_or_none()
+        
+        if state:
+            # Всегда создаем метод get_draft_workers независимо от содержимого
+            if state.draft_workers:
+                try:
+                    import json
+                    # Пытаемся парсить JSON
+                    parsed_workers = json.loads(state.draft_workers)
+                    object.__setattr__(state, '_parsed_workers', parsed_workers)
+                except (json.JSONDecodeError, TypeError):
+                    # Если не JSON, делаем список из строки
+                    if isinstance(state.draft_workers, str):
+                        object.__setattr__(state, '_parsed_workers', [state.draft_workers])
+                    else:
+                        object.__setattr__(state, '_parsed_workers', [])
+            else:
+                # Если нет draft_workers, создаем пустой список
+                object.__setattr__(state, '_parsed_workers', [])
+            
+            # Создаем метод для всех случаев
+            def get_workers():
+                return getattr(state, '_parsed_workers', [])
+            state.get_draft_workers = get_workers
+        
+        return state
     
     async def set_user_state(
         self, 
@@ -44,6 +69,11 @@ class WorkJournalService:
         **kwargs
     ) -> UserWorkJournalState:
         """Установить состояние пользователя"""
+        
+        # Сериализуем draft_workers если это список
+        if 'draft_workers' in kwargs and isinstance(kwargs['draft_workers'], list):
+            import json
+            kwargs['draft_workers'] = json.dumps(kwargs['draft_workers'])
         
         # Проверяем, есть ли уже состояние
         existing_state = await self.get_user_state(telegram_user_id)

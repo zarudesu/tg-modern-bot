@@ -147,10 +147,13 @@ EMOJI = {
 MESSAGE_TEMPLATES = {
     "start_entry": f"{EMOJI['journal']} *Журнал работ*\n\nСоздание новой записи о выполненных работах\\.",
     "date_selection": f"{EMOJI['date']} *Выберите дату:*",
+    "custom_date_prompt": f"{EMOJI['date']} *Введите дату*\n\nВведите дату в формате ДД\\.ММ\\.ГГГГ\n\nНапример: 08\\.08\\.2025",
     "company_selection": f"{EMOJI['company']} *Выберите компанию:*", 
+    "custom_company_prompt": f"{EMOJI['company']} *Новая компания*\n\nВведите название новой компании:",
     "duration_selection": f"{EMOJI['time']} *Время на работу:*",
+    "custom_duration_prompt": f"{EMOJI['time']} *Произвольное время*\n\nВведите время в разных форматах:\n\nНапример: 45 мин, 2 часа, 1\\.5 часа, 90 мин",
     "description_prompt": f"{EMOJI['description']} *Описание выполненных работ*\n\nНапишите подробное описание того, что было сделано:",
-    "description_input": f"{EMOJI['description']} *Описание выполненных работ*\n\nНапишите подробное описание того, что было сделано\\. Когда закончите, нажмите кнопку **Далее** \\.",
+    "description_input": f"{EMOJI['description']} *Описание выполненных работ*\n\nНапишите подробное описание того, что было сделано:",
     "travel_selection": f"{EMOJI['travel']} *Был ли выезд на объект?*",
     "worker_selection": f"{EMOJI['worker']} *Кто выполнял работы?*",
     "confirmation": f"{EMOJI['check']} *Подтверждение записи*"

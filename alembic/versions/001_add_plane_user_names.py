@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import TEXT
 
 # revision identifiers
-revision = '001_plane_users'
+revision = '001'
 down_revision = None
 branch_labels = None
 depends_on = None

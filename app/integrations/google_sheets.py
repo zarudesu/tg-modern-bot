@@ -12,7 +12,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 
-from ..config import config
+from ..config import settings
 from ..database.database import get_async_session
 from ..database.work_journal_models import WorkJournalEntry, WorkJournalWorker, WorkJournalCompany
 from ..services.work_journal_service import WorkJournalService
@@ -41,7 +41,7 @@ class GoogleSheetsParser:
     
     def __init__(self):
         self.service_account_email = "n8n-sheets-integration@hhivp-plane.iam.gserviceaccount.com"
-        self.spreadsheet_id = config.GOOGLE_SHEETS_ID
+        self.spreadsheet_id = settings.google_sheets_id
         self.credentials = None
         self.client = None
         self.worksheet = None
@@ -50,9 +50,9 @@ class GoogleSheetsParser:
         """Инициализация Google Sheets клиента"""
         try:
             # Получаем credentials из переменных окружения или файла
-            if hasattr(config, 'GOOGLE_SHEETS_CREDENTIALS_JSON'):
+            if hasattr(settings, 'google_sheets_credentials_json'):
                 # Если credentials в JSON формате в переменной окружения
-                credentials_info = json.loads(config.GOOGLE_SHEETS_CREDENTIALS_JSON)
+                credentials_info = json.loads(settings.google_sheets_credentials_json)
                 self.credentials = Credentials.from_service_account_info(
                     credentials_info,
                     scopes=[
@@ -60,10 +60,10 @@ class GoogleSheetsParser:
                         'https://www.googleapis.com/auth/drive.readonly'
                     ]
                 )
-            elif hasattr(config, 'GOOGLE_SHEETS_CREDENTIALS_FILE'):
+            elif hasattr(settings, 'google_sheets_credentials_file'):
                 # Если credentials в файле
                 self.credentials = Credentials.from_service_account_file(
-                    config.GOOGLE_SHEETS_CREDENTIALS_FILE,
+                    settings.google_sheets_credentials_file,
                     scopes=[
                         'https://www.googleapis.com/auth/spreadsheets.readonly',
                         'https://www.googleapis.com/auth/drive.readonly'
@@ -328,7 +328,7 @@ class GoogleSheetsParser:
         try:
             # Определяем telegram_user_id и created_by_user_id
             # Поскольку данные из Google Sheets, используем системного пользователя
-            system_user_id = config.ADMIN_USER_IDS[0] if config.ADMIN_USER_IDS else 0
+            system_user_id = settings.admin_user_id_list[0] if settings.admin_user_id_list else 0
             
             # Определяем статус командировки
             is_travel = sheet_entry.is_travel.lower() in ['да', 'yes', 'true', '1', 'командировка']
