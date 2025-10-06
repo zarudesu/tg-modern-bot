@@ -39,21 +39,40 @@ class AuthMiddleware(BaseMiddleware):
         
         # Проверяем, является ли пользователь администратором
         if not settings.is_admin(user.id):
-            bot_logger.warning(f"Non-admin user {user.id} (@{user.username}) tried to use bot")
-            
-            # Отправляем сообщение о том, что бот только для админов
+            # Если это сообщение в группе - НЕ блокируем, пусть обработчики решают
+            # (Chat Monitor, Support Requests могут работать с группами)
             if isinstance(event, Message):
-                await event.answer(
-                    "🔒 *Доступ ограничен*\n\n"
-                    "Этот бот доступен только администраторам\\.",
-                    parse_mode="MarkdownV2"
-                )
+                chat_type = event.chat.type
+                is_group = chat_type in ["group", "supergroup"]
+
+                # В группах - молча пропускаем сообщения (НЕ флудим!)
+                # Модули сами решат, нужна ли авторизация через фильтры
+                if is_group:
+                    bot_logger.debug(f"Non-admin user {user.id} message in group {event.chat.id} - allowing (modules will filter)")
+                    # Добавляем базовую информацию для модулей
+                    data['db_user'] = None
+                    data['user_role'] = 'guest'
+                    data['is_admin'] = False
+                    return await handler(event, data)
+
+                # В приватных чатах - блокируем с уведомлением
+                else:
+                    bot_logger.warning(f"Non-admin user {user.id} (@{user.username}) tried to use bot in private")
+                    await event.answer(
+                        "🔒 *Доступ ограничен*\n\n"
+                        "Этот бот доступен только администраторам\\.",
+                        parse_mode="MarkdownV2"
+                    )
+                    return  # Блокируем выполнение
+
+            # Callback query - всегда блокируем для не-админов
             elif isinstance(event, CallbackQuery):
+                bot_logger.warning(f"Non-admin user {user.id} (@{user.username}) tried callback")
                 await event.answer(
                     "Доступ ограничен. Бот только для администраторов.",
                     show_alert=True
                 )
-            return  # Блокируем выполнение
+                return  # Блокируем выполнение
         
         # Если пользователь админ, продолжаем обработку
         

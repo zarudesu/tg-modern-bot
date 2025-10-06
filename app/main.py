@@ -190,14 +190,17 @@ async def main():
     try:
         # Создание бота и диспетчера с правильными timeout настройками
         from aiohttp import ClientTimeout
-        
+        from aiogram.fsm.storage.memory import MemoryStorage
+
         bot = Bot(
             token=settings.telegram_token,
             default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN_V2),
             session=None  # Используем сессию по умолчанию с настройками timeout
         )
-        
-        dp = Dispatcher()
+
+        # FSM storage с поддержкой групп (user_id + chat_id)
+        storage = MemoryStorage()
+        dp = Dispatcher(storage=storage)
         
         # Регистрация middleware (порядок важен!)
         # 1. Database Session - должен быть первым и только ОДИН раз
@@ -249,7 +252,12 @@ async def main():
         dp.include_router(ai_assistant_router)
         bot_logger.info("✅ AI Assistant module loaded")
 
-        # 6. Chat Monitor module - чтение групповых чатов
+        # 6. Chat Support module - simple request handling from groups (ПЕРЕД chat_monitor!)
+        from .modules.chat_support.router import router as chat_support_router
+        dp.include_router(chat_support_router)
+        bot_logger.info("✅ Chat Support module loaded (simple /request flow)")
+
+        # 7. Chat Monitor module - чтение групповых чатов (ПОСЛЕДНИМ - ловит всё остальное)
         from .modules.chat_monitor.router import router as chat_monitor_router
         dp.include_router(chat_monitor_router)
         bot_logger.info("✅ Chat Monitor module loaded")

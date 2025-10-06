@@ -5,6 +5,7 @@
 """
 from aiogram import Router, F
 from aiogram.types import Message
+from aiogram.filters import BaseFilter
 from typing import List
 
 from ...core.events.event_bus import event_bus, EventHandler, Event
@@ -14,12 +15,61 @@ from ...utils.logger import bot_logger
 router = Router()
 
 
-@router.message(F.chat.type.in_(["group", "supergroup"]))
+class NotInSupportRequestFilter(BaseFilter):
+    """Filter to exclude messages when user has active support request (FSM state)"""
+
+    async def __call__(self, message: Message) -> bool:
+        # Import here to avoid circular dependency
+        from ..chat_support.states import SupportRequestStates
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+
+        # Access FSM storage through message bot
+        try:
+            # Get current state for this user in this chat
+            state_key = StorageKey(
+                bot_id=message.bot.id,
+                chat_id=message.chat.id,
+                user_id=message.from_user.id
+            )
+
+            # Get FSM storage from bot
+            storage = message.bot.fsm.storage if hasattr(message.bot, 'fsm') else None
+            if not storage:
+                # No FSM storage available, allow message
+                return True
+
+            # Get current state
+            state_data = await storage.get_state(state_key)
+
+            # Check if user is in support request state
+            is_in_support_state = (
+                state_data is not None and
+                state_data.startswith('SupportRequestStates:')
+            )
+
+            if is_in_support_state:
+                bot_logger.info(f"🚫 Chat Monitor: Skipping message (user in FSM state: {state_data})")
+
+            # Return True if NOT in support state (allow Chat Monitor)
+            return not is_in_support_state
+
+        except Exception as e:
+            bot_logger.error(f"Error checking FSM state in filter: {e}")
+            # On error, allow message to be processed
+            return True
+
+
+@router.message(
+    F.chat.type.in_(["group", "supergroup"]),
+    ~(F.text & F.text.startswith("/")),  # Игнорируем команды
+    NotInSupportRequestFilter()  # Игнорируем активные support requests
+)
 async def monitor_group_message(message: Message):
     """
     Мониторинг сообщений в группах
 
-    Читает ВСЕ сообщения в группах и публикует события
+    Читает ВСЕ сообщения в группах (кроме команд) и публикует события
     """
     try:
         # Определяем тип сообщения

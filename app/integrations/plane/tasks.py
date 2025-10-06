@@ -294,3 +294,61 @@ class PlaneTasksManager:
             return (has_due_date, priority_value, task.target_date or '')
 
         return sorted(tasks, key=sort_key)
+
+    async def create_issue(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        name: str,
+        description: str = "",
+        priority: str = "medium",
+        labels: Optional[List[str]] = None
+    ) -> Optional[Dict]:
+        """
+        Create a new issue in Plane
+
+        Args:
+            session: aiohttp client session
+            project_id: Plane project UUID
+            name: Issue title
+            description: Issue description
+            priority: Priority level (urgent, high, medium, low, none)
+            labels: List of label names to attach
+
+        Returns:
+            Created issue data or None on failure
+        """
+        try:
+            endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/"
+
+            # Prepare issue data
+            issue_data = {
+                "name": name,
+                "description": description,
+                "priority": priority,
+            }
+
+            # Add labels if provided
+            if labels:
+                issue_data["labels"] = labels
+
+            bot_logger.info(f"📝 Creating issue in project {project_id[:8]}: {name[:50]}")
+
+            # POST request to create issue
+            response = await self.client.post(session, endpoint, json_data=issue_data)
+
+            if response:
+                issue_id = response.get('id', 'unknown')
+                sequence_id = response.get('sequence_id', 'unknown')
+                bot_logger.info(f"✅ Issue created successfully: #{sequence_id} (id={issue_id[:8]})")
+                return response
+            else:
+                bot_logger.error("❌ Failed to create issue: No response from API")
+                return None
+
+        except PlaneAPIError as e:
+            bot_logger.error(f"❌ Plane API error creating issue: {e}")
+            return None
+        except Exception as e:
+            bot_logger.error(f"❌ Error creating issue: {e}")
+            return None
