@@ -217,16 +217,13 @@ class TaskReportsService:
             # Search criteria
             search_conditions = []
 
-            # 1. By support_request_id (if available)
-            if task_report.support_request_id:
-                search_conditions.append(
-                    WorkJournalEntry.support_request_id == task_report.support_request_id
-                )
+            # NOTE: WorkJournalEntry does not have support_request_id field
+            # Only search by plane_sequence_id mention in work_description
 
-            # 2. By plane_sequence_id mention in description
+            # By plane_sequence_id mention in work_description
             if task_report.plane_sequence_id:
                 search_conditions.append(
-                    WorkJournalEntry.description.ilike(f"%{task_report.plane_sequence_id}%")
+                    WorkJournalEntry.work_description.ilike(f"%{task_report.plane_sequence_id}%")
                 )
 
             if not search_conditions:
@@ -253,8 +250,7 @@ class TaskReportsService:
             if not entries:
                 bot_logger.info(
                     f"ℹ️ No work_journal entries found for autofill "
-                    f"(support_request_id={task_report.support_request_id}, "
-                    f"plane_seq={task_report.plane_sequence_id})"
+                    f"(plane_seq={task_report.plane_sequence_id})"
                 )
                 return False
 
