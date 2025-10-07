@@ -1,6 +1,7 @@
 """
 Plane API Tasks Module - Task retrieval and filtering logic
 """
+import asyncio
 import aiohttp
 from typing import List, Dict, Optional
 from ...utils.logger import bot_logger
@@ -64,10 +65,13 @@ class PlaneTasksManager:
             # 3. Get project states
             bot_logger.info(f"🔍 Fetching states for {len(projects)} projects")
             project_states = {}
-            for project in projects:
+            for idx, project in enumerate(projects):
                 states = await self.projects_manager.get_project_states(session, project.id)
                 if states:
                     project_states[project.id] = states
+                # Add delay between state requests to avoid rate limiting
+                if idx < len(projects) - 1:
+                    await asyncio.sleep(0.5)
 
             bot_logger.info(f"Built user mapping with {len(user_id_to_email)} users")
 
@@ -94,6 +98,10 @@ class PlaneTasksManager:
                     bot_logger.info(f"  📊 Total accumulated tasks: {len(all_tasks)}")
                 else:
                     bot_logger.debug(f"  ⏭️ [{idx+1}/{len(projects)}] No assigned tasks in '{project.name}'")
+
+                # Add delay between projects to avoid rate limiting
+                if idx < len(projects) - 1:  # Don't delay after last project
+                    await asyncio.sleep(0.6)
 
             # Sort by priority
             bot_logger.info(f"🔄 Sorting {len(all_tasks)} tasks by priority")

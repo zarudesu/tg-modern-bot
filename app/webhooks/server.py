@@ -216,12 +216,17 @@ class WebhookServer:
                 project_name = escape_md(data.get('project_name', ''))
                 project_line = f"**Проект:** {project_name}\n" if project_name else ""
 
+                # Build Plane task URL
+                plane_url = f"https://plane.hhivp.com/hhivp/projects/{task_report.plane_project_id}/issues/{task_report.plane_issue_id}"
+                plane_link = f"[Открыть в Plane]({plane_url})"
+
                 notification_text = (
                     f"📋 **Требуется отчёт о выполненной задаче\\!**\n\n"
                     f"**Задача:** \\#{task_report.plane_sequence_id}\n"
                     f"**Название:** {task_title}\n"
                     f"{project_line}"
-                    f"**Закрыл:** {closed_by}{autofill_notice}"
+                    f"**Закрыл:** {closed_by}\n"
+                    f"{plane_link}{autofill_notice}"
                 )
 
                 # Кнопки
