@@ -1,0 +1,98 @@
+{
+  "name": "Plane Task Completed → Telegram Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "plane-task-done",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Plane Task Done",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "plane-task-done"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.event }}",
+              "operation": "equals",
+              "value2": "issue.activity.updated"
+            },
+            {
+              "value1": "={{ $json.activity.field }}",
+              "operation": "equals",
+              "value2": "state"
+            },
+            {
+              "value1": "={{ $json.activity.new_value }}",
+              "operation": "contains",
+              "value2": "Done"
+            }
+          ]
+        }
+      },
+      "id": "if-task-done",
+      "name": "IF Task is Done",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Извлекаем support_request_id из описания\nconst description = $input.item.json.issue?.description || '';\nlet supportRequestId = null;\n\nconst match = description.match(/support_request_id[=:\\s]+(\\d+)/i);\nif (match) {\n  supportRequestId = parseInt(match[1]);\n}\n\n// Формируем payload для бота\nconst payload = {\n  plane_issue_id: $input.item.json.issue.id,\n  plane_sequence_id: $input.item.json.issue.sequence_id,\n  plane_project_id: $input.item.json.issue.project_id,\n  task_title: $input.item.json.issue.name,\n  task_description: description,\n  closed_by: {\n    display_name: $input.item.json.activity.actor.display_name,\n    first_name: $input.item.json.activity.actor.first_name,\n    email: $input.item.json.activity.actor.email\n  },\n  closed_at: $input.item.json.timestamp,\n  support_request_id: supportRequestId\n};\n\nreturn { json: payload };"
+      },
+      "id": "function-transform",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://telegram-bot-app:8080/webhooks/task-completed",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "authentication": "none",
+        "requestMethod": "POST",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "http-to-bot",
+      "name": "HTTP Request → Bot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Plane Task Done": {
+      "main": [[{"node": "IF Task is Done", "type": "main", "index": 0}]]
+    },
+    "IF Task is Done": {
+      "main": [[{"node": "Transform Data", "type": "main", "index": 0}]]
+    },
+    "Transform Data": {
+      "main": [[{"node": "HTTP Request → Bot", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -25,19 +25,11 @@ def create_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 История работ", callback_data="show_history")
         ],
         [
-            InlineKeyboardButton(text="✈️ Мои задачи из Plane", callback_data="daily_tasks"),
-            InlineKeyboardButton(text="⚙️ Настройки задач", callback_data="daily_settings")
+            InlineKeyboardButton(text="✈️ Мои задачи", callback_data="daily_tasks")
         ],
         [
-            InlineKeyboardButton(text="📈 Отчеты", callback_data="show_reports"),
-            InlineKeyboardButton(text="🏢 Компании", callback_data="manage_companies")
-        ],
-        [
-            InlineKeyboardButton(text="🔄 Синхронизация Google Sheets", callback_data="sheets_sync_menu")
-        ],
-        [
-            InlineKeyboardButton(text="❓ Справка", callback_data="show_help"),
-            InlineKeyboardButton(text="👤 Профиль", callback_data="show_profile")
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings"),
+            InlineKeyboardButton(text="❓ Справка", callback_data="show_help")
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -212,23 +204,70 @@ async def callback_main_menu(callback_query: CallbackQuery):
     try:
         user_id = callback_query.from_user.id
         log_user_action(user_id, "main_menu")
-        
+
         welcome_text = (
             "🏠 *Главное меню*\n\n"
             "Добро пожаловать в HHIVP IT Assistant Bot\\!\n\n"
             "Выберите действие из меню ниже:"
         )
-        
+
         await callback_query.message.edit_text(
             welcome_text,
             reply_markup=create_main_menu_keyboard(),
             parse_mode="MarkdownV2"
         )
         await callback_query.answer()
-        
+
     except Exception as e:
         bot_logger.error(f"Main menu callback error: {e}")
         await callback_query.answer("❌ Ошибка при открытии меню", show_alert=True)
+
+
+@router.callback_query(F.data == "show_settings")
+async def callback_settings(callback_query: CallbackQuery):
+    """Обработчик меню настроек"""
+    try:
+        user_id = callback_query.from_user.id
+
+        # Получаем информацию о пользователе
+        async for session in get_async_session():
+            result = await session.execute(
+                select(BotUser).where(BotUser.telegram_user_id == user_id)
+            )
+            user = result.scalar_one_or_none()
+
+            if not user:
+                await callback_query.answer("❌ Пользователь не найден", show_alert=True)
+                return
+
+            # Формируем меню настроек
+            settings_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✈️ Настройки задач из Plane", callback_data="daily_settings")],
+                [InlineKeyboardButton(text="🏢 Компании", callback_data="manage_companies")],
+                [InlineKeyboardButton(text="👤 Мой профиль", callback_data="show_profile")],
+                [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
+            ])
+
+            username = user.username or "Не указан"
+            role_emoji = "👑" if user.role == "admin" else "👤"
+
+            settings_text = (
+                f"⚙️ *Настройки*\n\n"
+                f"{role_emoji} *Пользователь:* @{username}\n"
+                f"🎭 *Роль:* {user.role}\n\n"
+                f"Выберите раздел настроек:"
+            )
+
+            await callback_query.message.edit_text(
+                settings_text,
+                reply_markup=settings_keyboard,
+                parse_mode="MarkdownV2"
+            )
+            await callback_query.answer()
+
+    except Exception as e:
+        bot_logger.error(f"Settings callback error: {e}")
+        await callback_query.answer("❌ Ошибка при открытии настроек", show_alert=True)
 
 
 @router.message(Command("ping"))
@@ -245,19 +284,12 @@ async def ping_command(message: Message):
         await message.answer("❌ Ошибка при выполнении ping\\.", parse_mode="MarkdownV2")
 
 
-# Команды для меню бота
+# Команды для меню бота (упрощенное)
 COMMANDS_MENU = [
-    BotCommand(command="start", description="🚀 Начать работу с ботом"),
-    BotCommand(command="help", description="❓ Справка по командам"),
-    BotCommand(command="profile", description="👤 Мой профиль"),
-    BotCommand(command="ping", description="🏓 Проверка работоспособности"),
-    BotCommand(command="journal", description="📋 Создать запись в журнале работ"),
-    BotCommand(command="history", description="📊 История работ"),
-    BotCommand(command="report", description="📈 Отчеты по работам"),
-    BotCommand(command="companies", description="🏢 Управление компаниями"),
-    BotCommand(command="daily_tasks", description="✈️ Мои задачи из Plane"),
-    BotCommand(command="daily_settings", description="⚙️ Настройки ежедневных уведомлений"),
-    BotCommand(command="plane_test", description="🧪 Тест подключения к Plane"),
+    BotCommand(command="start", description="🏠 Главное меню"),
+    BotCommand(command="help", description="❓ Справка"),
+    BotCommand(command="daily_tasks", description="✈️ Мои задачи"),
+    BotCommand(command="request", description="📝 Создать заявку (в группе)"),
 ]
 
 

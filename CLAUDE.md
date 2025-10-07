@@ -152,8 +152,45 @@ Key models:
 - `app/database/daily_tasks_models.py` - `AdminDailyTasksSettings`, `DailyTasksLog`
 - `app/database/user_tasks_models.py` - `UserTasksCache` for Plane sync
 - `app/database/work_journal_models.py` - Work journal v2 models
+- `app/database/task_reports_models.py` - `TaskReport` for client reports (NEW)
 
 Migrations: `alembic/versions/` - Run with `alembic upgrade head`
+
+### Task Reports System (NEW)
+
+**Purpose**: Automated client reporting when support requests are completed in Plane.so
+
+When a task is marked as "Done" in Plane:
+1. n8n webhook detects status change → sends to bot
+2. Bot creates TaskReport (pending status)
+3. Admin who closed task gets reminder to fill report
+4. Admin fills report (autofilled from work_journal if available)
+5. Report sent to client in original chat
+
+**Key files**:
+- `app/database/task_reports_models.py` - TaskReport model
+- `alembic/versions/004_add_task_reports.py` - Database migration
+- `docs/TASK_REPORTS_PLAN.md` - Complete implementation plan (400+ lines)
+
+**Status flow**: `pending → draft → approved → sent_to_client`
+
+**Reminder system**: Escalating notifications (1hr → 3hr → 6hr) until report filled
+
+**Integration points**:
+- n8n workflow: "hook from plane to tg + email reply" (ID: Y4fnJHlMGpABXCtq)
+- Plane webhook: Tracks `actor` field (who closed task)
+- Work journal: Auto-fill from recent entries
+- Support requests: Links via `support_request_id` foreign key
+
+**Development status**:
+- ✅ Database models created
+- ✅ Migration ready
+- ✅ Architecture documented
+- ⏳ Service layer pending
+- ⏳ FSM handlers pending
+- ⏳ n8n workflow update pending
+
+See `docs/TASK_REPORTS_PLAN.md` for complete implementation details.
 
 ### Configuration
 

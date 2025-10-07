@@ -121,12 +121,16 @@ async def handle_request_text(message: Message, state: FSMContext):
             # Auto-generate title from first 50 chars
             title = problem_text[:50] + ("..." if len(problem_text) > 50 else "")
 
-            # Create description with context
+            # Create description with full Telegram user context
             description = (
-                f"**Заявка от:** @{username}\n"
-                f"**Чат:** {message.chat.title}\n"
-                f"**Время:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                f"**Проблема:**\n{problem_text}"
+                f"**📱 Telegram User Info:**\n"
+                f"- **Full Name:** {user.full_name}\n"
+                f"- **Username:** @{user.username or 'не указан'}\n"
+                f"- **User ID:** `{user.id}`\n"
+                f"- **Chat:** {message.chat.title}\n"
+                f"- **Time:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"---\n\n"
+                f"**📝 Описание проблемы:**\n\n{problem_text}"
             )
 
             bot_logger.info(f"🔄 Creating auto-request: title='{title[:30]}'")
@@ -155,22 +159,45 @@ async def handle_request_text(message: Message, state: FSMContext):
                 # Build Plane link
                 plane_url = f"https://plane.hhivp.com/hhivp/projects/{plane_request.plane_project_id}/issues/{plane_request.plane_issue_id}"
 
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔗 Открыть в Plane", url=plane_url)],
-                    [InlineKeyboardButton(text="📋 Мои заявки", callback_data="my_requests")]
-                ])
-
+                # Reply to user - ONLY ticket number (no link for clients)
                 await message.reply(
                     f"✅ **Заявка создана!**\n\n"
-                    f"📋 Номер в боте: #{request.id}\n"
-                    f"🔢 Номер в Plane: #{plane_request.plane_sequence_id}\n"
-                    f"📝 Название: {title}\n"
-                    f"📁 Проект: {mapping.plane_project_name}\n"
-                    f"⚡ Приоритет: Средний\n\n"
-                    f"Заявка отправлена в Plane для обработки.",
-                    reply_markup=keyboard,
+                    f"📋 Номер заявки: **#{plane_request.plane_sequence_id}**\n"
+                    f"📁 Проект: {mapping.plane_project_name}\n\n"
+                    f"Ваша заявка принята и отправлена в обработку.\n"
+                    f"Администраторы уведомлены.",
                     parse_mode="Markdown"
                 )
+
+                # Notify all admins in private messages
+                from ...config import settings
+                user_info = (
+                    f"👤 **От кого:** {message.from_user.full_name}\n"
+                    f"🆔 **Telegram ID:** `{message.from_user.id}`\n"
+                    f"👤 **Username:** @{message.from_user.username or 'не указан'}\n"
+                    f"💬 **Чат:** {message.chat.title}\n"
+                )
+
+                admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔗 Открыть в Plane", url=plane_url)]
+                ])
+
+                for admin_id in settings.admin_user_id_list:
+                    try:
+                        await message.bot.send_message(
+                            chat_id=admin_id,
+                            text=(
+                                f"🔔 **Новая заявка #{plane_request.plane_sequence_id}**\n\n"
+                                f"{user_info}\n"
+                                f"📝 **Проблема:**\n{problem_text[:500]}\n\n"
+                                f"📁 **Проект:** {mapping.plane_project_name}"
+                            ),
+                            reply_markup=admin_keyboard,
+                            parse_mode="Markdown"
+                        )
+                        bot_logger.info(f"✅ Notified admin {admin_id} about request #{plane_request.plane_sequence_id}")
+                    except Exception as e:
+                        bot_logger.warning(f"Failed to notify admin {admin_id}: {e}")
             else:
                 bot_logger.error(f"Failed to submit request #{request.id} to Plane: {error_msg}")
                 await message.reply(

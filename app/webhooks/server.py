@@ -11,8 +11,8 @@ from aiohttp.web import Request, Response
 from aiogram import Bot
 
 from ..utils.logger import bot_logger
-from ..integrations.plane_with_mentions import PlaneNotificationService, PlaneWebhookPayload
-from ..services.plane_n8n_handler import PlaneN8nHandler, PlaneWebhookData
+# from ..integrations.plane_with_mentions import PlaneNotificationService, PlaneWebhookPayload
+# from ..services.plane_n8n_handler import PlaneN8nHandler, PlaneWebhookData
 from ..config import settings
 from ..database.database import get_async_session
 
@@ -28,8 +28,9 @@ class WebhookServer:
     
     def setup_routes(self):
         """Настройка маршрутов"""
-        self.app.router.add_post('/webhooks/plane', self.handle_plane_webhook)
-        self.app.router.add_post('/webhooks/plane-n8n', self.handle_plane_n8n_webhook)
+        # self.app.router.add_post('/webhooks/plane', self.handle_plane_webhook)
+        # self.app.router.add_post('/webhooks/plane-n8n', self.handle_plane_n8n_webhook)
+        self.app.router.add_post('/webhooks/task-completed', self.handle_task_completed_webhook)
         self.app.router.add_get('/health', self.health_check)
         self.app.router.add_get('/', self.root_handler)
     
@@ -46,8 +47,7 @@ class WebhookServer:
         return web.json_response({
             'service': 'Telegram Bot Webhooks',
             'endpoints': [
-                '/webhooks/plane - Plane.com direct webhooks',
-                '/webhooks/plane-n8n - Plane notifications from n8n',
+                '/webhooks/task-completed - Task completion reports (from n8n)',
                 '/health - Health check'
             ]
         })
@@ -134,18 +134,137 @@ class WebhookServer:
             bot_logger.error(f"Error processing n8n Plane webhook: {e}")
             return web.json_response({'error': 'Internal server error'}, status=500)
     
+    async def handle_task_completed_webhook(self, request: Request) -> Response:
+        """
+        Обработка webhook от n8n когда задача Plane переведена в Done
+
+        Ожидаемая структура данных от n8n:
+        {
+            "plane_issue_id": "uuid",
+            "plane_sequence_id": 123,
+            "plane_project_id": "uuid",
+            "task_title": "Task name",
+            "task_description": "Full description",
+            "closed_by": {
+                "display_name": "Zardes",
+                "first_name": "Zardes",
+                "email": "zarudesu@gmail.com"
+            },
+            "closed_at": "2025-10-07T12:00:00Z",
+            "support_request_id": 5  # Optional
+        }
+        """
+        try:
+            # Получаем данные
+            data = await request.json()
+
+            bot_logger.info(
+                f"📨 Received task-completed webhook: "
+                f"plane_issue={data.get('plane_issue_id')}, "
+                f"seq_id={data.get('plane_sequence_id')}"
+            )
+
+            # Импортируем сервис
+            from ..services.task_reports_service import task_reports_service
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            # Создаем сессию БД и обрабатываем
+            async for session in get_async_session():
+                # Создаем TaskReport из webhook данных
+                task_report = await task_reports_service.create_task_report_from_webhook(
+                    session=session,
+                    webhook_data=data
+                )
+
+                if not task_report:
+                    bot_logger.error("Failed to create TaskReport from webhook")
+                    return web.json_response(
+                        {'error': 'Failed to create task report'},
+                        status=500
+                    )
+
+                bot_logger.info(
+                    f"✅ Created TaskReport #{task_report.id} for "
+                    f"Plane issue {task_report.plane_sequence_id}"
+                )
+
+                # Отправляем уведомление админу (приоритет - кто закрыл)
+                admin_to_notify = task_report.closed_by_telegram_id
+
+                # Если не нашли кто закрыл - отправляем всем админам
+                admin_list = [admin_to_notify] if admin_to_notify else settings.admin_user_id_list
+
+                # Формируем сообщение
+                autofill_notice = ""
+                if task_report.auto_filled_from_journal:
+                    autofill_notice = "\\n\\n✅ _Отчёт автоматически заполнен из work journal_"
+
+                notification_text = (
+                    f"📋 **Требуется отчёт о выполненной задаче\\!**\\n\\n"
+                    f"**Задача:** \\#{task_report.plane_sequence_id}\\n"
+                    f"**Название:** {task_report.task_title or 'Не указано'}\\n"
+                    f"**Закрыл:** {task_report.closed_by_plane_name or 'Неизвестно'}{autofill_notice}"
+                )
+
+                # Кнопки
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="📝 Заполнить отчёт",
+                        callback_data=f"fill_report:{task_report.id}"
+                    )],
+                    # [InlineKeyboardButton(
+                    #     text="⚡ Пропустить (авто)",
+                    #     callback_data=f"skip_report:{task_report.id}"
+                    # )]  # TODO: Disabled for now
+                ])
+
+                # Отправляем уведомление
+                for admin_id in admin_list:
+                    try:
+                        await self.bot.send_message(
+                            chat_id=admin_id,
+                            text=notification_text,
+                            reply_markup=keyboard,
+                            parse_mode="MarkdownV2"
+                        )
+                        bot_logger.info(
+                            f"✅ Notified admin {admin_id} about TaskReport #{task_report.id}"
+                        )
+                    except Exception as e:
+                        bot_logger.warning(
+                            f"⚠️ Failed to notify admin {admin_id}: {e}"
+                        )
+
+                return web.json_response({
+                    'status': 'processed',
+                    'task_report_id': task_report.id,
+                    'plane_sequence_id': task_report.plane_sequence_id
+                })
+
+        except json.JSONDecodeError:
+            bot_logger.error("Invalid JSON in task-completed webhook")
+            return web.json_response({'error': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            bot_logger.error(f"Error processing task-completed webhook: {e}")
+            import traceback
+            bot_logger.error(traceback.format_exc())
+            return web.json_response(
+                {'error': 'Internal server error', 'details': str(e)},
+                status=500
+            )
+
     def _verify_signature(self, payload: str, signature: str, secret: str) -> bool:
         """Проверка подписи webhook"""
         if not signature:
             return False
-        
+
         # Вычисляем ожидаемую подпись
         expected_signature = hmac.new(
             secret.encode(),
             payload.encode(),
             hashlib.sha256
         ).hexdigest()
-        
+
         # Проверяем подпись
         return hmac.compare_digest(f"sha256={expected_signature}", signature)
     

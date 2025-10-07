@@ -302,7 +302,8 @@ class PlaneTasksManager:
         name: str,
         description: str = "",
         priority: str = "medium",
-        labels: Optional[List[str]] = None
+        labels: Optional[List[str]] = None,
+        assignees: Optional[List[str]] = None
     ) -> Optional[Dict]:
         """
         Create a new issue in Plane
@@ -313,7 +314,8 @@ class PlaneTasksManager:
             name: Issue title
             description: Issue description
             priority: Priority level (urgent, high, medium, low, none)
-            labels: List of label names to attach
+            labels: List of label UUIDs to attach
+            assignees: List of user UUIDs to assign
 
         Returns:
             Created issue data or None on failure
@@ -331,6 +333,10 @@ class PlaneTasksManager:
             # Add labels if provided
             if labels:
                 issue_data["labels"] = labels
+
+            # Add assignees if provided
+            if assignees:
+                issue_data["assignees"] = assignees
 
             bot_logger.info(f"📝 Creating issue in project {project_id[:8]}: {name[:50]}")
 

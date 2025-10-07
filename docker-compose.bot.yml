@@ -42,7 +42,10 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
-    
+
+    ports:
+      - "8080:8080"  # Webhook server для n8n
+
     networks:
       - telegram-bot-network  # Подключаемся к внешней сети
     

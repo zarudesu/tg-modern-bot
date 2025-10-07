@@ -44,6 +44,14 @@ async def on_startup(bot: Bot):
         await init_db()
         bot_logger.info("✅ Database initialized")
 
+        # Запуск webhook server для n8n
+        from .webhooks.server import WebhookServer
+        global webhook_server
+        webhook_server = WebhookServer(bot)
+        webhook_port = getattr(settings, 'webhook_port', 8080)
+        await webhook_server.start_server(host='0.0.0.0', port=webhook_port)
+        bot_logger.info(f"✅ Webhook server started on port {webhook_port}")
+
         # 🔥 НОВОЕ: Инициализация AI Manager (если есть API ключи)
         ai_api_key = getattr(settings, 'openai_api_key', None)
         if ai_api_key:
@@ -257,7 +265,12 @@ async def main():
         dp.include_router(chat_support_router)
         bot_logger.info("✅ Chat Support module loaded (simple /request flow)")
 
-        # 7. Chat Monitor module - чтение групповых чатов (ПОСЛЕДНИМ - ловит всё остальное)
+        # 7. Task Reports module - automated client reporting for completed tasks
+        from .modules.task_reports.router import router as task_reports_router
+        dp.include_router(task_reports_router)
+        bot_logger.info("✅ Task Reports module loaded (FSM-based report workflow)")
+
+        # 8. Chat Monitor module - чтение групповых чатов (ПОСЛЕДНИМ - ловит всё остальное)
         from .modules.chat_monitor.router import router as chat_monitor_router
         dp.include_router(chat_monitor_router)
         bot_logger.info("✅ Chat Monitor module loaded")

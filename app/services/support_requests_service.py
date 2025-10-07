@@ -172,12 +172,17 @@ class SupportRequestsService:
             return True, None, request  # Already created
 
         try:
-            # Create issue in Plane
+            # Get all workspace members to assign all admins
+            members = await plane_api.get_workspace_members()
+            admin_member_ids = [member.id for member in members] if members else []
+
+            # Create issue in Plane assigned to all admins
             issue_data = await plane_api.create_issue(
                 project_id=request.plane_project_id,
                 name=request.title,
                 description=request.description or "",
-                priority=request.priority
+                priority=request.priority,
+                assignees=admin_member_ids  # Assign to all workspace members
                 # labels removed - Plane requires UUIDs, not strings
             )
 

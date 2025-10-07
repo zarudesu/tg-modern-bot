@@ -179,6 +179,47 @@ class PlaneAPI:
             bot_logger.error(f"Error finding user by email: {e}")
             return None
 
+    async def create_issue(
+        self,
+        project_id: str,
+        name: str,
+        description: str = "",
+        priority: str = "medium",
+        labels: Optional[List[str]] = None,
+        assignees: Optional[List[str]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a new issue in Plane
+
+        Args:
+            project_id: Plane project UUID
+            name: Issue title
+            description: Issue description
+            priority: Priority level (urgent, high, medium, low, none)
+            labels: List of label names
+
+        Returns:
+            Created issue data or None on failure
+        """
+        if not self.configured:
+            bot_logger.error("Plane API not configured")
+            return None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.create_issue(
+                    session=session,
+                    project_id=project_id,
+                    name=name,
+                    description=description,
+                    priority=priority,
+                    labels=labels,
+                    assignees=assignees
+                )
+        except Exception as e:
+            bot_logger.error(f"Error creating issue: {e}")
+            return None
+
 
 # Create global instance using settings
 from ...config import settings
