@@ -54,11 +54,11 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
 
                 autofill_notice = ""
                 if task_report.auto_filled_from_journal:
-                    autofill_notice = "\\n\\n✅ _Автоматически заполнено из work journal_"
+                    autofill_notice = "\n\n✅ _Автоматически заполнено из work journal_"
 
                 await callback.message.edit_text(
-                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\\n\\n"
-                    f"**Текущий текст отчёта:**\\n{preview_text}{autofill_notice}\\n\\n"
+                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\n\n"
+                    f"**Текущий текст отчёта:**\n{preview_text}{autofill_notice}\n\n"
                     f"Отправьте новый текст отчёта или используйте кнопки ниже:",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -75,8 +75,8 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
             else:
                 # No autofill - ask admin to write report
                 await callback.message.edit_text(
-                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\\n\\n"
-                    f"**Название задачи:** {task_report.task_title}\\n\\n"
+                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\n\n"
+                    f"**Название задачи:** {task_report.task_title}\n\n"
                     f"Напишите отчёт о выполненной работе для клиента:",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -121,7 +121,7 @@ async def handle_report_text(message: Message, state: FSMContext):
         # Validate length
         if len(report_text) < 10:
             await message.reply(
-                "❌ Отчёт слишком короткий (минимум 10 символов).\\n\\n"
+                "❌ Отчёт слишком короткий (минимум 10 символов).\n\n"
                 "Пожалуйста, опишите выполненную работу подробнее.",
                 parse_mode="Markdown"
             )
@@ -150,9 +150,9 @@ async def handle_report_text(message: Message, state: FSMContext):
                 preview += "..."
 
             await message.reply(
-                f"✅ **Отчёт сохранён!**\\n\\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\\n"
-                f"**Текст отчёта:**\\n\\n{preview}\\n\\n"
+                f"✅ **Отчёт сохранён!**\n\n"
+                f"**Задача:** #{task_report.plane_sequence_id}\n"
+                f"**Текст отчёта:**\n\n{preview}\n\n"
                 f"Проверьте и подтвердите отправку клиенту:",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -203,8 +203,8 @@ async def callback_approve_report(callback: CallbackQuery, state: FSMContext):
 
             # Show confirmation
             await callback.message.edit_text(
-                f"✅ **Отчёт одобрен!**\\n\\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\\n\\n"
+                f"✅ **Отчёт одобрен!**\n\n"
+                f"**Задача:** #{task_report.plane_sequence_id}\n\n"
                 f"Отправить клиенту?",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -255,9 +255,9 @@ async def callback_send_report(callback: CallbackQuery, state: FSMContext, bot: 
             # Send to client
             try:
                 client_message = (
-                    f"✅ **Ваша заявка #{task_report.plane_sequence_id} выполнена!**\\n\\n"
-                    f"**Название:** {task_report.task_title}\\n\\n"
-                    f"**Отчёт о выполненной работе:**\\n\\n{task_report.report_text}"
+                    f"✅ **Ваша заявка #{task_report.plane_sequence_id} выполнена!**\n\n"
+                    f"**Название:** {task_report.task_title}\n\n"
+                    f"**Отчёт о выполненной работе:**\n\n{task_report.report_text}"
                 )
 
                 await bot.send_message(
@@ -276,7 +276,7 @@ async def callback_send_report(callback: CallbackQuery, state: FSMContext, bot: 
 
                 # Notify admin
                 await callback.message.edit_text(
-                    f"✅ **Отчёт отправлен клиенту!**\\n\\n"
+                    f"✅ **Отчёт отправлен клиенту!**\n\n"
                     f"Задача #{task_report.plane_sequence_id} завершена.",
                     parse_mode="Markdown"
                 )
@@ -315,7 +315,7 @@ async def callback_edit_report(callback: CallbackQuery, state: FSMContext):
         await state.update_data(task_report_id=task_report_id)
 
         await callback.message.edit_text(
-            "✏️ **Редактирование отчёта**\\n\\n"
+            "✏️ **Редактирование отчёта**\n\n"
             "Отправьте новый текст отчёта:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -348,7 +348,7 @@ async def callback_cancel_report(callback: CallbackQuery, state: FSMContext):
         bot_logger.info(f"❌ Admin {callback.from_user.id} cancelled report #{task_report_id}")
 
         await callback.message.edit_text(
-            "❌ Заполнение отчёта отменено.\\n\\n"
+            "❌ Заполнение отчёта отменено.\n\n"
             "Напоминание будет отправлено позже.",
             parse_mode="Markdown"
         )
@@ -375,7 +375,7 @@ async def callback_skip_report(callback: CallbackQuery):
     TODO: Implement in future version
     """
     await callback.answer(
-        "🚧 Эта функция пока не реализована.\\n\\n"
+        "🚧 Эта функция пока не реализована.\n\n"
         "Пожалуйста, заполните отчёт вручную.",
         show_alert=True
     )

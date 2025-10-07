@@ -210,10 +210,10 @@ class DailyTasksScheduler:
                             hours_str = f"{hours_elapsed:.1f}" if hours_elapsed < 2 else f"{int(hours_elapsed)}"
 
                             message_text = (
-                                f"{urgency_emoji} **{urgency_text}\\\\!** Требуется отчёт о задаче\\n\\n"
-                                f"**Задача:** \\\\#{report.plane_sequence_id}\\n"
-                                f"**Название:** {report.task_title or 'Не указано'}\\n"
-                                f"**Закрыто:** {hours_str} ч назад\\n"
+                                f"{urgency_emoji} **{urgency_text}\\!** Требуется отчёт о задаче\n\n"
+                                f"**Задача:** \\#{report.plane_sequence_id}\n"
+                                f"**Название:** {report.task_title or 'Не указано'}\n"
+                                f"**Закрыто:** {hours_str} ч назад\n"
                                 f"**Напоминаний:** {report.reminder_count + 1}"
                             )
 
