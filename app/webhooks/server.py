@@ -212,10 +212,15 @@ class WebhookServer:
                 task_title = escape_md(task_report.task_title or 'Не указано')
                 closed_by = escape_md(task_report.closed_by_plane_name or 'Неизвестно')
 
+                # Get project name from webhook data if available
+                project_name = escape_md(data.get('project_name', ''))
+                project_line = f"**Проект:** {project_name}\n" if project_name else ""
+
                 notification_text = (
                     f"📋 **Требуется отчёт о выполненной задаче\\!**\n\n"
                     f"**Задача:** \\#{task_report.plane_sequence_id}\n"
                     f"**Название:** {task_title}\n"
+                    f"{project_line}"
                     f"**Закрыл:** {closed_by}{autofill_notice}"
                 )
 
