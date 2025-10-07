@@ -265,9 +265,10 @@ class TaskReportsService:
 
             for entry in entries:
                 date_str = entry.created_at.strftime("%d.%m.%Y")
-                duration_str = self._format_duration(entry.duration_minutes)
+                duration_str = entry.work_duration if hasattr(entry, 'work_duration') else 'N/A'
+                work_desc = entry.work_description if hasattr(entry, 'work_description') else ''
                 report_lines.append(
-                    f"📅 {date_str} ({duration_str}):\n{entry.description}\n"
+                    f"📅 {date_str} ({duration_str}):\n{work_desc}\n"
                 )
 
             autofilled_text = "\n".join(report_lines)

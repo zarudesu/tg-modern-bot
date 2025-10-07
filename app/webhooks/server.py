@@ -199,11 +199,24 @@ class WebhookServer:
                 if task_report.auto_filled_from_journal:
                     autofill_notice = "\\n\\n✅ _Отчёт автоматически заполнен из work journal_"
 
+                # Экранируем спецсимволы MarkdownV2
+                def escape_md(text: str) -> str:
+                    """Escape special characters for MarkdownV2"""
+                    if not text:
+                        return text
+                    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+                    for char in special_chars:
+                        text = text.replace(char, f'\\{char}')
+                    return text
+
+                task_title = escape_md(task_report.task_title or 'Не указано')
+                closed_by = escape_md(task_report.closed_by_plane_name or 'Неизвестно')
+
                 notification_text = (
                     f"📋 **Требуется отчёт о выполненной задаче\\!**\\n\\n"
                     f"**Задача:** \\#{task_report.plane_sequence_id}\\n"
-                    f"**Название:** {task_report.task_title or 'Не указано'}\\n"
-                    f"**Закрыл:** {task_report.closed_by_plane_name or 'Неизвестно'}{autofill_notice}"
+                    f"**Название:** {task_title}\\n"
+                    f"**Закрыл:** {closed_by}{autofill_notice}"
                 )
 
                 # Кнопки
