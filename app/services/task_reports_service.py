@@ -4,15 +4,17 @@ Task Reports Service - Business logic for client task reports
 When a task is completed in Plane, this service:
 1. Creates TaskReport from webhook data
 2. Maps Plane user to Telegram admin
-3. Auto-fills report from work_journal if available
-4. Manages report status transitions
-5. Sends reports to clients
+3. Fetches comments and description from Plane API
+4. Auto-generates report from comments + description
+5. Manages report status transitions
+6. Sends reports to clients
 """
 
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+import json
 
 from ..database.task_reports_models import TaskReport
 from ..database.support_requests_models import SupportRequest
@@ -117,10 +119,22 @@ class TaskReportsService:
             # Check if already exists
             existing = await self.get_task_report_by_plane_issue(session, plane_issue_id)
             if existing:
-                bot_logger.warning(
-                    f"⚠️ TaskReport already exists for plane_issue_id={plane_issue_id}"
+                # If task was already completed, this is a duplicate (task moved Done→ToDo→Done)
+                if existing.status == "completed":
+                    bot_logger.warning(
+                        f"🔄 Duplicate webhook: TaskReport #{existing.id} for plane_issue={plane_issue_id} "
+                        f"already completed. Ignoring to prevent re-reporting."
+                    )
+                    return None  # Return None to prevent duplicate admin notification
+
+                # If status is pending/cancelled, allow recreation (legitimate re-completion)
+                bot_logger.info(
+                    f"♻️ Re-creating TaskReport for plane_issue={plane_issue_id} "
+                    f"(previous status: {existing.status})"
                 )
-                return existing
+                # Delete old incomplete report to start fresh
+                await session.delete(existing)
+                await session.flush()
 
             # Map Plane user → Telegram
             closed_by = webhook_data.get("closed_by", {})
@@ -183,8 +197,12 @@ class TaskReportsService:
                 f"Plane issue {task_report.plane_sequence_id}"
             )
 
-            # Try to autofill from work_journal
-            await self.try_autofill_from_work_journal(session, task_report)
+            # Fetch comments and description from Plane API
+            await self.fetch_and_generate_report_from_plane(session, task_report)
+
+            # Try to autofill from work_journal (as fallback if Plane data is empty)
+            if not task_report.report_text:
+                await self.try_autofill_from_work_journal(session, task_report)
 
             return task_report
 
@@ -194,7 +212,213 @@ class TaskReportsService:
             return None
 
     # ═══════════════════════════════════════════════════════════
-    # AUTO-FILL FROM WORK JOURNAL
+    # FETCH FROM PLANE API AND AUTO-GENERATE REPORT
+    # ═══════════════════════════════════════════════════════════
+
+    async def fetch_and_generate_report_from_plane(
+        self,
+        session: AsyncSession,
+        task_report: TaskReport
+    ) -> bool:
+        """
+        Fetch comments and description from Plane API and auto-generate report
+
+        Args:
+            session: Database session
+            task_report: TaskReport to populate
+
+        Returns:
+            True if report was generated, False otherwise
+        """
+        try:
+            from ..integrations.plane import plane_api
+
+            if not plane_api.configured:
+                bot_logger.warning("⚠️ Plane API not configured, skipping comment fetch")
+                return False
+
+            if not task_report.plane_project_id or not task_report.plane_issue_id:
+                bot_logger.warning(
+                    f"⚠️ Missing project_id or issue_id for TaskReport #{task_report.id}"
+                )
+                return False
+
+            bot_logger.info(
+                f"📥 Fetching Plane data for issue {task_report.plane_issue_id}"
+            )
+
+            # Fetch issue details (for full description)
+            issue_details = await plane_api.get_issue_details(
+                project_id=task_report.plane_project_id,
+                issue_id=task_report.plane_issue_id
+            )
+
+            # Fetch comments from Plane API
+            comments = await plane_api.get_issue_comments(
+                project_id=task_report.plane_project_id,
+                issue_id=task_report.plane_issue_id
+            )
+
+            if not issue_details and not comments:
+                bot_logger.info("ℹ️ No additional data from Plane API")
+                return False
+
+            # Update task_description if we got more details
+            if issue_details and issue_details.get('description'):
+                task_report.task_description = issue_details['description']
+                bot_logger.info(f"✅ Updated task description from Plane API")
+
+            # Generate report text from comments + description
+            bot_logger.info(
+                f"🔨 Generating report from: title={bool(task_report.task_title)}, "
+                f"description={bool(task_report.task_description)}, "
+                f"comments_count={len(comments) if comments else 0}"
+            )
+
+            report_text = self._generate_report_text(
+                title=task_report.task_title,
+                description=task_report.task_description,
+                comments=comments,
+                sequence_id=task_report.plane_sequence_id
+            )
+
+            bot_logger.info(f"🔨 Generated report_text length: {len(report_text) if report_text else 0}")
+
+            if report_text:
+                task_report.report_text = report_text
+                task_report.auto_filled_from_journal = True  # Mark as auto-generated
+                task_report.status = "draft"  # Move to draft since we have content
+
+                await session.commit()
+
+                bot_logger.info(
+                    f"✅ Auto-generated report for TaskReport #{task_report.id} "
+                    f"from {len(comments)} comments"
+                )
+                return True
+            else:
+                bot_logger.info("ℹ️ No content to generate report from")
+                return False
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error fetching from Plane API: {e}")
+            return False
+
+    def _generate_report_text(
+        self,
+        title: Optional[str],
+        description: Optional[str],
+        comments: List[Dict],
+        sequence_id: Optional[int]
+    ) -> str:
+        """
+        Generate user-friendly report text from Plane data
+
+        Args:
+            title: Task title
+            description: Task description
+            comments: List of comment objects
+            sequence_id: HHIVP-123 number
+
+        Returns:
+            Formatted report text
+        """
+        report_lines = []
+
+        # Header
+        if sequence_id:
+            report_lines.append(f"📋 **Отчёт по задаче HHIVP-{sequence_id}**\n")
+        else:
+            report_lines.append(f"📋 **Отчёт по выполненной задаче**\n")
+
+        # Task title
+        if title:
+            report_lines.append(f"**Задача:** {title}\n")
+
+        # Description (if meaningful)
+        if description and len(description.strip()) > 10:
+            report_lines.append(f"**Описание:**\n{description}\n")
+
+        # Comments (main content)
+        if comments:
+            report_lines.append(f"**Выполненные работы:**\n")
+            bot_logger.info(f"🔨 Processing {len(comments)} comments for report generation")
+
+            for idx, comment in enumerate(comments, 1):
+                comment_html = comment.get('comment_html', '').strip()
+                bot_logger.debug(
+                    f"  Comment {idx}: has comment_html={bool(comment_html)}, "
+                    f"keys={list(comment.keys())[:5]}"
+                )
+                if not comment_html:
+                    bot_logger.warning(f"  ⚠️ Comment {idx} has no comment_html, skipping")
+                    continue
+
+                # Strip HTML tags from comment
+                import re
+                comment_text = re.sub(r'<[^>]+>', '', comment_html).strip()
+
+                if not comment_text:
+                    continue
+
+                # Extract actor name (try multiple paths in Plane API)
+                actor_detail = comment.get('actor_detail', {})
+                actor = comment.get('actor', {})
+                created_by = comment.get('created_by', {})
+
+                # Try all possible name fields from Plane API
+                actor_name = (
+                    actor_detail.get('display_name') or
+                    actor_detail.get('first_name') or
+                    actor.get('display_name') or
+                    actor.get('first_name') or
+                    created_by.get('display_name') or
+                    created_by.get('first_name') or
+                    'Unknown'
+                )
+
+                # Log if we got Unknown (for debugging)
+                if actor_name == 'Unknown':
+                    bot_logger.warning(
+                        f"⚠️ Could not extract author name from comment. "
+                        f"actor_detail keys: {list(actor_detail.keys())}, "
+                        f"actor keys: {list(actor.keys())}, "
+                        f"created_by keys: {list(created_by.keys())}"
+                    )
+
+                # Extract timestamp
+                created_at = comment.get('created_at', '')
+                if created_at:
+                    try:
+                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        date_str = dt.strftime("%d.%m.%Y %H:%M")
+                    except:
+                        date_str = created_at[:10]
+                else:
+                    date_str = ''
+
+                # Format comment
+                report_lines.append(
+                    f"{idx}. [{actor_name}] {date_str}\n"
+                    f"   {comment_text}\n"
+                )
+
+        if len(report_lines) <= 2:  # Only header + title
+            bot_logger.warning(
+                f"⚠️ Report has only {len(report_lines)} lines (header+title), "
+                f"returning empty. Lines: {report_lines}"
+            )
+            return ""  # No meaningful content
+
+        final_report = "\n".join(report_lines)
+        bot_logger.info(
+            f"✅ Generated report with {len(report_lines)} lines, "
+            f"total length: {len(final_report)} chars"
+        )
+        return final_report
+
+    # ═══════════════════════════════════════════════════════════
+    # AUTO-FILL FROM WORK JOURNAL (FALLBACK)
     # ═══════════════════════════════════════════════════════════
 
     async def try_autofill_from_work_journal(
@@ -260,11 +484,34 @@ class TaskReportsService:
             ]
 
             for entry in entries:
-                date_str = entry.created_at.strftime("%d.%m.%Y")
-                duration_str = entry.work_duration if hasattr(entry, 'work_duration') else 'N/A'
-                work_desc = entry.work_description if hasattr(entry, 'work_description') else ''
+                # Дата работы
+                date_str = entry.work_date.strftime("%d.%m.%Y")
+
+                # Часы работы
+                duration_str = entry.work_duration
+
+                # Тип работы (выезд/удаленно)
+                work_type = "🚗 Выезд" if entry.is_travel else "💻 Удаленно"
+
+                # Исполнители (парсим JSON)
+                try:
+                    workers = json.loads(entry.worker_names)
+                    workers_str = ", ".join(workers) if isinstance(workers, list) else entry.worker_names
+                except:
+                    workers_str = entry.worker_names
+
+                # Компания
+                company_str = entry.company
+
+                # Описание работы
+                work_desc = entry.work_description
+
+                # Формируем запись
                 report_lines.append(
-                    f"📅 {date_str} ({duration_str}):\n{work_desc}\n"
+                    f"📅 **{date_str}** | {work_type} | ⏱️ {duration_str}\n"
+                    f"🏢 **Компания:** {company_str}\n"
+                    f"👥 **Исполнители:** {workers_str}\n"
+                    f"📝 **Описание:**\n{work_desc}\n"
                 )
 
             autofilled_text = "\n".join(report_lines)
@@ -335,6 +582,63 @@ class TaskReportsService:
             await session.rollback()
             return None
 
+    async def update_metadata(
+        self,
+        session: AsyncSession,
+        task_report_id: int,
+        work_duration: Optional[str] = None,
+        is_travel: Optional[bool] = None,
+        company: Optional[str] = None,
+        workers: Optional[str] = None  # JSON string
+    ) -> Optional[TaskReport]:
+        """
+        Update task report metadata (duration, work_type, company, workers)
+
+        Args:
+            task_report_id: TaskReport ID
+            work_duration: Duration string (e.g., "2h", "4h")
+            is_travel: True if travel, False if remote
+            company: Company name
+            workers: JSON string with list of workers
+
+        Returns:
+            Updated TaskReport or None
+        """
+        try:
+            task_report = await self.get_task_report(session, task_report_id)
+            if not task_report:
+                return None
+
+            # Update fields if provided
+            if work_duration is not None:
+                task_report.work_duration = work_duration
+                bot_logger.info(f"📝 Updated duration: {work_duration}")
+
+            if is_travel is not None:
+                task_report.is_travel = is_travel
+                bot_logger.info(f"📝 Updated is_travel: {is_travel}")
+
+            if company is not None:
+                task_report.company = company
+                bot_logger.info(f"📝 Updated company: {company}")
+
+            if workers is not None:
+                task_report.workers = workers
+                bot_logger.info(f"📝 Updated workers: {workers}")
+
+            await session.commit()
+            await session.refresh(task_report)
+
+            bot_logger.info(
+                f"✅ Updated metadata for TaskReport #{task_report_id}"
+            )
+            return task_report
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error updating metadata: {e}")
+            await session.rollback()
+            return None
+
     async def approve_report(
         self,
         session: AsyncSession,
@@ -396,6 +700,43 @@ class TaskReportsService:
 
         except Exception as e:
             bot_logger.error(f"❌ Error marking report as sent: {e}")
+            await session.rollback()
+            return None
+
+    async def close_without_report(
+        self,
+        session: AsyncSession,
+        task_report_id: int
+    ) -> Optional[TaskReport]:
+        """
+        Close task report without sending to client
+
+        Admin decision to skip client notification. This is used when:
+        - No client is linked to the task
+        - Internal task (no client notification needed)
+        - Admin decides not to send report
+
+        Returns:
+            Updated TaskReport or None
+        """
+        try:
+            task_report = await self.get_task_report(session, task_report_id)
+            if not task_report:
+                return None
+
+            task_report.status = "cancelled"
+
+            await session.commit()
+            await session.refresh(task_report)
+
+            bot_logger.info(
+                f"✅ Closed TaskReport #{task_report_id} without sending to client "
+                f"(Plane task #{task_report.plane_sequence_id})"
+            )
+            return task_report
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error closing report without notification: {e}")
             await session.rollback()
             return None
 

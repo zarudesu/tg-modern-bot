@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🚧 ACTIVE REFACTORING: Task Reports Module
+
+**Status:** Planning complete, ready to start
+**Branch:** `refactor/task-reports-module` (to be created)
+**Documentation:**
+- `docs/TASK_REPORTS_REFACTORING.md` - Полный план рефакторинга
+- `docs/CURRENT_BUGS.md` - Детальное описание 5 багов
+
+**Before making ANY changes to task_reports module, read these files first!**
+
 ## Essential Commands
 
 ### Development Workflow
