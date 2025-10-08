@@ -40,7 +40,7 @@ class PlaneAPIClient:
                     headers=self.headers,
                     params=params,
                     json=json_data,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=15, connect=3)  # ⚡ Быстрые таймауты
                 ) as response:
                     if response.status == 401:
                         raise PlaneAuthError("Invalid API token")

@@ -8,7 +8,8 @@ from aiogram import Router
 from .handlers import router as handlers_router
 from .email_handlers import router as email_router
 from .callback_handlers import router as callback_router
-from .navigation_handlers import router as navigation_router
+from .tasks_list_handlers import router as tasks_list_router
+from .my_tasks_handlers import router as my_tasks_router
 
 # Создаем основной роутер модуля
 router = Router()
@@ -18,8 +19,9 @@ router = Router()
 router.include_router(email_router)
 
 # 2. Navigation/Callback обработчики - ВТОРОЙ
-router.include_router(navigation_router)
+router.include_router(tasks_list_router)
+router.include_router(my_tasks_router)
 router.include_router(callback_router)
 
-# 3. Команды daily_tasks - ТРЕТИЙ  
+# 3. Команды daily_tasks - ТРЕТИЙ
 router.include_router(handlers_router)

@@ -144,6 +144,18 @@ bot-down:
 bot-logs:
 	docker-compose -f docker-compose.bot.yml logs -f telegram-bot
 
+bot-rebuild:
+	@echo "🔨 Пересборка бота (с кэшем)..."
+	docker-compose -f docker-compose.bot.yml build
+	docker-compose -f docker-compose.bot.yml up -d
+	@echo "✅ Бот пересобран и перезапущен!"
+
+bot-rebuild-clean:
+	@echo "🔨 Полная пересборка бота (без кэша)..."
+	docker-compose -f docker-compose.bot.yml build --no-cache
+	docker-compose -f docker-compose.bot.yml up -d
+	@echo "✅ Бот пересобран с нуля и перезапущен!"
+
 bot-shell:
 	docker-compose -f docker-compose.bot.yml exec telegram-bot bash
 

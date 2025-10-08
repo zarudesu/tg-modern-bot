@@ -81,13 +81,13 @@ class WorkerMentionService:
             f"⏱ **Время:** {entry.work_duration}\n"
             f"🚗 **Тип:** {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
             f"📝 **Описание:**\n{entry.work_description}\n\n"
-            f"👤 **Создал:** {creator_name}\n\n"
         )
-        
-        # Добавляем ссылку на Google Sheets если настроена
-        if settings.google_sheets_url:
-            message += f"📊 [Google Sheets]({settings.google_sheets_url})\n\n"
 
+        # Добавляем ссылку на Google Sheets (просто URL) и создателя в конце
+        if settings.google_sheets_url:
+            message += f"📊 {settings.google_sheets_url}\n\n"
+
+        message += f"👤 **Создал:** {creator_name}\n"
         message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
         return message

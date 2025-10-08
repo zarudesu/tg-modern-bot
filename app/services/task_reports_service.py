@@ -346,17 +346,23 @@ class TaskReportsService:
 
             for idx, comment in enumerate(comments, 1):
                 comment_html = comment.get('comment_html', '').strip()
+                comment_plain = comment.get('comment', '').strip()  # BUG FIX #1: Fallback to plain comment
                 bot_logger.debug(
                     f"  Comment {idx}: has comment_html={bool(comment_html)}, "
-                    f"keys={list(comment.keys())[:5]}"
+                    f"has comment={bool(comment_plain)}, keys={list(comment.keys())[:5]}"
                 )
-                if not comment_html:
-                    bot_logger.warning(f"  ⚠️ Comment {idx} has no comment_html, skipping")
+
+                # BUG FIX #1: Try comment_html first, then fall back to comment field
+                if not comment_html and not comment_plain:
+                    bot_logger.warning(f"  ⚠️ Comment {idx} has no content, skipping")
                     continue
 
                 # Strip HTML tags from comment
                 import re
-                comment_text = re.sub(r'<[^>]+>', '', comment_html).strip()
+                if comment_html:
+                    comment_text = re.sub(r'<[^>]+>', '', comment_html).strip()
+                else:
+                    comment_text = comment_plain  # Use plain comment as fallback
 
                 if not comment_text:
                     continue

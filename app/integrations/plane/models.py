@@ -124,3 +124,8 @@ class PlaneTask(BaseModel):
             return '📋'
         else:
             return '📌'
+
+    @property
+    def task_url(self) -> str:
+        """URL to task in Plane"""
+        return f"https://plane.hhivp.com/projects/{self.project}/issues/{self.id}"

@@ -19,3 +19,9 @@ class TaskReportStates(StatesGroup):
 
     # Admin is reviewing report before sending to client
     reviewing_report = State()
+
+    # Metadata collection workflow
+    filling_duration = State()  # Waiting for work duration (e.g., "2h")
+    filling_work_type = State()  # Waiting for work type selection (travel/remote)
+    filling_company = State()  # Waiting for company name
+    filling_workers = State()  # Waiting for workers list

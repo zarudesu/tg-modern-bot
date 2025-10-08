@@ -26,6 +26,74 @@ class PlaneTasksManager:
         self.users_manager = users_manager
         self._projects_cache = []
 
+    async def get_issue_details(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        issue_id: str
+    ) -> Optional[Dict]:
+        """
+        Get full issue details including description and all metadata
+
+        Args:
+            session: aiohttp session
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+
+        Returns:
+            Full issue data with description, assignees, labels, etc.
+        """
+        try:
+            endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/{issue_id}/"
+            params = {"expand": "assignees,state,labels"}
+
+            bot_logger.info(f"📥 Fetching issue details: {issue_id}")
+            data = await self.client.get(session, endpoint, params=params)
+
+            if data:
+                bot_logger.info(f"✅ Retrieved issue details for {issue_id}")
+            return data
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error fetching issue details: {e}")
+            return None
+
+    async def get_issue_comments(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        issue_id: str
+    ) -> List[Dict]:
+        """
+        Get all comments for an issue
+
+        Args:
+            session: aiohttp session
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+
+        Returns:
+            List of comment objects with actor, comment, created_at, etc.
+        """
+        try:
+            endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/{issue_id}/comments/"
+
+            bot_logger.info(f"💬 Fetching comments for issue: {issue_id}")
+            data = await self.client.get(session, endpoint)
+
+            comments = []
+            if isinstance(data, list):
+                comments = data
+            elif isinstance(data, dict) and 'results' in data:
+                comments = data['results']
+
+            bot_logger.info(f"✅ Retrieved {len(comments)} comments for {issue_id}")
+            return comments
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error fetching issue comments: {e}")
+            return []
+
     async def get_user_tasks(
         self,
         session: aiohttp.ClientSession,
@@ -62,46 +130,43 @@ class PlaneTasksManager:
                 bot_logger.warning(f"❌ Email {user_email} not found in workspace")
                 raise ValueError(f"Email {user_email} не найден в Plane. Проверьте правильность email адреса.")
 
-            # 3. Get project states
-            bot_logger.info(f"🔍 Fetching states for {len(projects)} projects")
-            project_states = {}
-            for idx, project in enumerate(projects):
-                states = await self.projects_manager.get_project_states(session, project.id)
-                if states:
-                    project_states[project.id] = states
-                # Add delay between state requests to avoid rate limiting
-                if idx < len(projects) - 1:
-                    await asyncio.sleep(0.5)
-
             bot_logger.info(f"Built user mapping with {len(user_id_to_email)} users")
 
-            # 4. Get assigned tasks from each project
-            bot_logger.info(f"🔄 Starting to fetch tasks from {len(projects)} projects for {user_email}")
+            # 3. Get assigned tasks from all projects (NO states needed - comes in expand!)
+            bot_logger.info(f"🔄 Fetching tasks from {len(projects)} projects for {user_email}")
+
+            # PARALLEL processing - fetch all projects simultaneously for maximum speed
+            bot_logger.info(f"⚡ Using parallel API requests for {len(projects)} projects")
             all_tasks = []
 
-            for idx, project in enumerate(projects):
-                bot_logger.info(f"🔍 [{idx+1}/{len(projects)}] Processing project: {project.name} (id={project.id[:8]})")
-
-                project_states_for_project = project_states.get(project.id, {})
-                project_tasks = await self._get_project_issues(
-                    session=session,
-                    project_id=project.id,
-                    user_email=user_email,
-                    user_id_to_email=user_id_to_email,
-                    project_states=project_states_for_project,
-                    assigned_only=True
+            # Create tasks for all projects at once
+            fetch_tasks = []
+            for project in projects:
+                fetch_tasks.append(
+                    self._get_project_issues(
+                        session=session,
+                        project_id=project.id,
+                        user_email=user_email,
+                        user_id_to_email=user_id_to_email,
+                        project_states={},  # Not needed - state comes in expand
+                        assigned_only=True
+                    )
                 )
 
-                if project_tasks:
-                    bot_logger.info(f"  ✅ [{idx+1}/{len(projects)}] Found {len(project_tasks)} assigned tasks in '{project.name}'")
-                    all_tasks.extend(project_tasks)
-                    bot_logger.info(f"  📊 Total accumulated tasks: {len(all_tasks)}")
-                else:
-                    bot_logger.debug(f"  ⏭️ [{idx+1}/{len(projects)}] No assigned tasks in '{project.name}'")
+            # Execute all requests in parallel
+            results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-                # Add delay between projects to avoid rate limiting
-                if idx < len(projects) - 1:  # Don't delay after last project
-                    await asyncio.sleep(0.6)
+            # Process results
+            for idx, (project, result) in enumerate(zip(projects, results), 1):
+                if isinstance(result, Exception):
+                    bot_logger.error(f"  ❌ Error in project '{project.name}': {result}")
+                    continue
+
+                if result:
+                    bot_logger.info(f"  ✅ Found {len(result)} tasks in '{project.name}'")
+                    all_tasks.extend(result)
+                else:
+                    bot_logger.debug(f"  ⏭️ No tasks in '{project.name}'")
 
             # Sort by priority
             bot_logger.info(f"🔄 Sorting {len(all_tasks)} tasks by priority")
@@ -246,11 +311,16 @@ class PlaneTasksManager:
                                 enriched_issue['project_name'] = project.get('name', 'Unknown')
                                 break
 
-                    # Add state information
-                    if project_states and issue.get('state'):
-                        # Extract state_id from dict
-                        state_id = issue['state'].get('id') if isinstance(issue['state'], dict) else issue['state']
-                        state_info = project_states.get(state_id)
+                    # Add state information - use expanded state from API
+                    state_obj = issue.get('state')
+                    if isinstance(state_obj, dict):
+                        # State expanded from API (via expand=state)
+                        enriched_issue['state_detail'] = state_obj
+                        enriched_issue['state_name'] = state_obj.get('name', 'Unknown')
+                        bot_logger.debug(f"    🔧 [TASK {task_seq}] Enriched with state_name='{enriched_issue['state_name']}' from expanded API")
+                    elif project_states and state_obj:
+                        # Fallback: use project_states if provided
+                        state_info = project_states.get(state_obj)
                         if state_info:
                             enriched_issue['state_detail'] = state_info
                             enriched_issue['state_name'] = state_info.get('name', 'Unknown')

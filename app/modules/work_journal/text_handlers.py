@@ -77,10 +77,9 @@ async def handle_work_journal_text_input(message: Message):
             
             else:
                 bot_logger.warning(f"Unknown work_journal state: {current_state} for user {user_id}")
-                await message.answer(
-                    "❌ *Неизвестное состояние*\n\nИспользуйте /journal для начала\\.",
-                    parse_mode="MarkdownV2"
-                )
+                # Не показываем сообщение пользователю, просто игнорируем
+                # (может быть state от другого модуля, например task_reports)
+                return
             
     except Exception as e:
         bot_logger.error(f"Error in work_journal text handler for user {message.from_user.id}: {e}")

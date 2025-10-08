@@ -7,7 +7,7 @@ from typing import Optional
 import pytz
 
 from ..services.daily_tasks_service import daily_tasks_service
-from ..services.user_tasks_cache_service import user_tasks_cache_service
+# CACHE DISABLED: user_tasks_cache_service removed - using direct Plane API calls
 from ..services.task_reports_service import task_reports_service
 from ..utils.logger import bot_logger
 from ..config import settings
@@ -34,9 +34,10 @@ class DailyTasksScheduler:
 
         self.running = True
         self.task = asyncio.create_task(self._scheduler_loop())
-        self.sync_task = asyncio.create_task(self._cache_sync_loop())
+        # CACHE DISABLED: Direct API calls instead (rate limit 600/min)
+        # self.sync_task = asyncio.create_task(self._cache_sync_loop())
         self.reminder_task = asyncio.create_task(self._reminders_loop())
-        bot_logger.info("Daily tasks scheduler, cache sync and task reminders started")
+        bot_logger.info("Daily tasks scheduler and task reminders started (cache sync disabled)")
     
     async def stop(self):
         """Остановить планировщик"""

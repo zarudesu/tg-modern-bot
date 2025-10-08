@@ -251,10 +251,17 @@ async def callback_settings(callback_query: CallbackQuery):
             username = user.username or "Не указан"
             role_emoji = "👑" if user.role == "admin" else "👤"
 
+            # Экранируем спецсимволы для MarkdownV2
+            def escape_md(text: str) -> str:
+                special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+                for char in special_chars:
+                    text = text.replace(char, f'\\{char}')
+                return text
+
             settings_text = (
                 f"⚙️ *Настройки*\n\n"
-                f"{role_emoji} *Пользователь:* @{username}\n"
-                f"🎭 *Роль:* {user.role}\n\n"
+                f"{role_emoji} *Пользователь:* @{escape_md(username)}\n"
+                f"🎭 *Роль:* {escape_md(user.role)}\n\n"
                 f"Выберите раздел настроек:"
             )
 
