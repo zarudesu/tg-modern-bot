@@ -269,17 +269,50 @@ async def handle_custom_duration(message: Message, state: FSMContext):
                 work_duration=formatted_duration
             )
 
-        # Move to work type selection
-        await state.set_state(TaskReportStates.filling_work_type)
+        # Check if we're in editing mode
+        editing_mode = state_data.get('editing_mode', False)
 
-        # Show work type keyboard
-        keyboard = create_work_type_keyboard(task_report_id)
+        if editing_mode:
+            # Return to preview after editing
+            bot_logger.info(f"📝 Editing mode: returning to preview after custom duration update")
 
-        await message.reply(
-            f"✅ Длительность: **{formatted_duration}**\n\n"
-            f"🚗 **Был ли выезд к клиенту?**",
-            reply_markup=keyboard
-        )
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
+
+            # Trigger preview_report callback
+            from aiogram.types import CallbackQuery as FakeCallback
+            from ..handlers.preview import callback_preview_report
+
+            # Create a fake message with reply method
+            fake_message = type('obj', (object,), {
+                'edit_text': message.answer,
+                'reply': message.reply,
+                'answer': message.answer,
+                'chat': message.chat,
+                'from_user': message.from_user
+            })()
+
+            fake_callback = type('obj', (object,), {
+                'data': f'preview_report:{task_report_id}',
+                'from_user': message.from_user,
+                'message': fake_message,
+                'answer': lambda text='', show_alert=False: None  # Dummy answer
+            })()
+
+            await callback_preview_report(fake_callback, state)
+            return
+        else:
+            # Continue to next step (work type selection)
+            await state.set_state(TaskReportStates.filling_work_type)
+
+            # Show work type keyboard
+            keyboard = create_work_type_keyboard(task_report_id)
+
+            await message.reply(
+                f"✅ Длительность: **{formatted_duration}**\n\n"
+                f"🚗 **Был ли выезд к клиенту?**",
+                reply_markup=keyboard
+            )
 
     except Exception as e:
         bot_logger.error(f"❌ Error handling custom duration: {e}")

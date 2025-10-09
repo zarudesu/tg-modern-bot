@@ -40,6 +40,22 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
             bot_logger.error(f"Invalid report_id in callback: {e}")
             await callback.answer("❌ Неверный ID отчёта", show_alert=True)
             return
+        # Check if we're in editing mode (user clicked "Back" button during edit)
+        state_data = await state.get_data()
+        editing_mode = state_data.get('editing_mode', False)
+
+        if editing_mode:
+            # Return to preview instead of starting fill flow
+            bot_logger.info(f"📝 Editing mode: returning to preview from 'Back' button")
+
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
+
+            # Trigger preview_report callback
+            from ..handlers.preview import callback_preview_report
+            await callback_preview_report(callback, state)
+            return
+
         bot_logger.info(f"📝 Admin {callback.from_user.id} started filling report #{task_report_id}")
 
         # Get task report from DB

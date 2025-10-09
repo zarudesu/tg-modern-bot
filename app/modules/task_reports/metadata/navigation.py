@@ -264,6 +264,39 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             state_data = await state.get_data()
             plane_assignees = state_data.get("plane_assignees", [])
 
+            # BUG FIX #4: If plane_assignees not in state, load from Plane API
+            if not plane_assignees and task_report:
+                try:
+                    from ....integrations.plane import plane_api
+
+                    if plane_api.configured and task_report.plane_project_id and task_report.plane_issue_id:
+                        bot_logger.info(f"📥 Loading Plane assignees for workers edit (task #{task_report.plane_sequence_id})...")
+
+                        # Fetch issue details to get assignees
+                        plane_details = await plane_api.get_issue_details(
+                            project_id=task_report.plane_project_id,
+                            issue_id=task_report.plane_issue_id
+                        )
+
+                        if plane_details and plane_details.get('assignee_details'):
+                            plane_assignees = [
+                                assignee.get('display_name') or assignee.get('first_name', 'Unknown')
+                                for assignee in plane_details['assignee_details']
+                            ]
+
+                            # Add "who closed" if not in assignees
+                            if task_report.closed_by_plane_name and task_report.closed_by_plane_name not in plane_assignees:
+                                plane_assignees.append(task_report.closed_by_plane_name)
+
+                            # Save to FSM state for future use
+                            await state.update_data(plane_assignees=plane_assignees)
+
+                            bot_logger.info(f"✅ Loaded {len(plane_assignees)} Plane assignees: {plane_assignees}")
+                        else:
+                            bot_logger.warning(f"⚠️ No assignees found in Plane for task #{task_report.plane_sequence_id}")
+                except Exception as e:
+                    bot_logger.warning(f"⚠️ Failed to load Plane assignees: {e}")
+
             # Update FSM state with current workers
             await state.update_data(selected_workers=current_workers)
 
