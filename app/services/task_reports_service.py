@@ -651,9 +651,11 @@ class TaskReportsService:
                     f"   {comment_text}\n"
                 )
 
-        if len(report_lines) <= 2:  # Only header + title
+        # Only reject if we have ONLY header (no title) or empty
+        # Header + title is still meaningful (shows task completion)
+        if len(report_lines) <= 1:
             bot_logger.warning(
-                f"⚠️ Report has only {len(report_lines)} lines (header+title), "
+                f"⚠️ Report has only {len(report_lines)} lines (header only), "
                 f"returning empty. Lines: {report_lines}"
             )
             return ""  # No meaningful content
