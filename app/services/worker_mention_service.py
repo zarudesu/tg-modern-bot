@@ -83,11 +83,13 @@ class WorkerMentionService:
             f"📝 **Описание:**\n{entry.work_description}\n\n"
         )
 
-        # Добавляем ссылку на Google Sheets (просто URL) и создателя в конце
-        if settings.google_sheets_url:
-            message += f"📊 {settings.google_sheets_url}\n\n"
-
+        # Добавляем создателя и ссылку на Google Sheets (clickable link)
         message += f"👤 **Создал:** {creator_name}\n"
+
+        if settings.google_sheets_url:
+            # Markdown clickable link: [text](URL)
+            message += f"[📊 Google Sheets]({settings.google_sheets_url})\n"
+
         message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
         return message

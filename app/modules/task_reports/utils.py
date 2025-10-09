@@ -7,6 +7,59 @@ Helper functions and mappings for task reports module
 from ...utils.logger import bot_logger
 
 
+# ═══════════════════════════════════════════════════════════
+# USER MAPPINGS: TELEGRAM USERNAME → DISPLAY NAME & HANDLE
+# ═══════════════════════════════════════════════════════════
+
+# For preview display: telegram_username → short display name
+TELEGRAM_TO_DISPLAY_NAME = {
+    "zardes": "Костя",
+    "dima_gusev": "Дима",
+    "timofey_batyrev": "Тимофей",
+}
+
+# For group messages: telegram_username → @handle
+TELEGRAM_TO_HANDLE = {
+    "zardes": "@zardes",
+    "dima_gusev": "@gendir_hhivp",
+    "timofey_batyrev": "@spiritphoto",
+}
+
+
+def map_workers_to_display_names(workers_list: list) -> str:
+    """
+    Map telegram usernames to display names for preview
+
+    Args:
+        workers_list: List of telegram usernames (e.g., ["zardes", "dima_gusev"])
+
+    Returns:
+        str: Comma-separated display names (e.g., "Костя, Дима")
+    """
+    display_names = []
+    for worker in workers_list:
+        display_name = TELEGRAM_TO_DISPLAY_NAME.get(worker, worker)
+        display_names.append(display_name)
+    return ", ".join(display_names)
+
+
+def map_worker_to_handle(telegram_username: str) -> str:
+    """
+    Map telegram username to @handle for group messages
+
+    Args:
+        telegram_username: Telegram username (e.g., "zardes")
+
+    Returns:
+        str: @handle (e.g., "@zardes")
+    """
+    return TELEGRAM_TO_HANDLE.get(telegram_username, f"@{telegram_username}")
+
+
+# ═══════════════════════════════════════════════════════════
+# COMPANY MAPPING
+# ═══════════════════════════════════════════════════════════
+
 # Company name mapping: Plane → наши названия
 COMPANY_MAPPING = {
     "HarzLabs": "Харц Лабз",
