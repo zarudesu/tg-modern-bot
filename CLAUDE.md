@@ -35,24 +35,62 @@ make dev
 
 ### If Already Running
 
-**Local dev (bot_manager.sh):**
+**⚠️ IMPORTANT: Choose correct workflow based on your setup!**
+
+#### 📍 Local Development (bot_manager.sh)
 ```bash
-make dev-restart  # Fast restart
+make dev-restart  # Fast restart (reloads code automatically)
 make bot-logs     # View logs
 ```
 
-**Docker deployment:**
+#### 🐳 Docker Development (code INSIDE container)
+
+**✅ RECOMMENDED: Use Makefile commands**
 ```bash
-# Apply code changes (FULL REBUILD without cache!)
+# After code changes - FULL REBUILD (slow but guaranteed)
+make bot-rebuild-clean    # Only bot (DB must be running)
+make full-rebuild-clean   # Full stack (DB + Redis + Bot)
+
+# View logs
+make bot-logs
+# Or: make full-logs
+```
+
+**Manual Docker commands (if needed):**
+```bash
+# Option 1: Full rebuild (SAFEST after code changes)
 docker-compose build --no-cache telegram-bot
 docker-compose up -d --force-recreate telegram-bot
 
-# Or single command (for specific service):
-docker-compose up -d --build --force-recreate --no-deps telegram-bot
+# Option 2: Faster rebuild (uses cache for unchanged layers)
+docker-compose build telegram-bot
+docker-compose up -d --force-recreate telegram-bot
 
 # View logs
-docker logs telegram-bot-app-full -f
+docker-compose logs -f telegram-bot
+# Or: docker logs telegram-bot-app-full -f
 ```
+
+**❌ WRONG - will NOT apply code changes:**
+```bash
+docker-compose restart telegram-bot        # Only restarts OLD container ❌
+docker-compose build telegram-bot          # Builds image but doesn't update container ❌
+docker-compose up -d telegram-bot          # Uses EXISTING container if running ❌
+```
+
+**Why `--force-recreate`?**
+- Our `docker-compose.yml` does NOT mount code as volume (only logs & .env)
+- Code is **baked into Docker image** during build
+- `restart` = restart old container with old code
+- `up -d --force-recreate` = delete old container + create new from fresh image
+
+**Quick Reference:**
+| Scenario | Command |
+|----------|---------|
+| Changed Python code | `make bot-rebuild-clean` or `make full-rebuild-clean` |
+| Changed requirements.txt | `make bot-rebuild-clean` (needs --no-cache) |
+| Changed .env only | `docker-compose restart telegram-bot` (OK) |
+| Changed docker-compose.yml | `docker-compose up -d --force-recreate telegram-bot` |
 
 ---
 
@@ -60,10 +98,14 @@ docker logs telegram-bot-app-full -f
 
 ### Development Workflow
 ```bash
-# Core commands
+# Local development (fastest, code auto-reload)
 make dev                          # Start database + bot
 make dev-restart                  # Restart bot only (FAST)
 make dev-stop                     # Stop everything
+
+# Docker development (code changes require rebuild)
+make bot-rebuild-clean            # Rebuild bot after code changes
+make full-rebuild-clean           # Rebuild full stack after code changes
 
 # Monitoring
 make bot-logs                     # View bot logs (most common)
@@ -566,27 +608,28 @@ make db-shell  # Test connection
 
 **Changes not applied:**
 
-Depends on your setup:
+See [Quick Start > If Already Running](#if-already-running) for detailed workflow.
 
-```bash
-# If running in Docker (production/staging):
-# Step 1: Rebuild WITHOUT cache (important!)
-docker-compose build --no-cache telegram-bot
+**TL;DR:**
+- **Docker:** Must rebuild image + recreate container (NOT just restart!)
+  ```bash
+  make bot-rebuild-clean       # Recommended (Makefile)
+  # Or manually:
+  docker-compose build --no-cache telegram-bot
+  docker-compose up -d --force-recreate telegram-bot
+  ```
 
-# Step 2: Force recreate container
-docker-compose up -d --force-recreate telegram-bot
+- **Local dev:** Code reloads automatically
+  ```bash
+  make dev-restart
+  ```
 
-# Alternative: single command (rebuilds but may use cache for some layers)
-docker-compose up -d --build --force-recreate --no-deps telegram-bot
+⚠️ **Common mistakes:**
+- `docker-compose restart` - only restarts OLD container ❌
+- `docker-compose up -d` - doesn't recreate container ❌
+- `docker-compose build` alone - doesn't update running container ❌
 
-# If running locally (dev):
-make dev-restart  # Restart bot process only
-```
-
-⚠️ **Important:**
-- `make dev-restart` does NOT rebuild Docker images!
-- `docker-compose build` without `--no-cache` may use cached layers and NOT apply code changes
-- Always use `--no-cache` flag when rebuilding after code changes
+✅ **Must use:** `--force-recreate` flag or Makefile commands!
 
 ### Useful Log Commands
 ```bash
@@ -737,6 +780,8 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 ---
 
-**Last Updated:** 2025-10-08
+**Last Updated:** 2025-10-09
 **Bot Version:** 2.5 (Task Reports Production Ready)
 **Questions?** Check logs: `make bot-logs`
+
+📚 **See also:** [README_DOCKER.md](README_DOCKER.md) - Detailed Docker development guide
