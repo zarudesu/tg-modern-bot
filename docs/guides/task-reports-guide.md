@@ -186,35 +186,90 @@ await worker_mention_service.notify_group(...)
 
 ## 🧪 Testing
 
-### Manual Testing Flow
+### Test Script: Create Test Task with Comments & Assignees
 
-1. **Create test task in Plane:**
+**Location:** `/tmp/create_test_task.py`
+
+This script creates a realistic test task in Plane with:
+- ✅ Full description (HTML format)
+- ✅ 2 test comments (Russian text)
+- ✅ Auto-assigned to your user
+- ✅ High priority
+- ✅ Ready to close → test full flow
+
+**Usage:**
 ```bash
-# Use test script
-PLANE_API_TOKEN=token ./venv/bin/python test_task_reports_flow.py
+# Set your Plane API token (get from SECRETS.md or .env)
+export PLANE_API_TOKEN="plane_api_xxxx"
+
+# Run the script
+./venv/bin/python /tmp/create_test_task.py
 ```
 
-2. **Mark task as Done in Plane UI**
+**Expected Output:**
+```
+📋 Available projects:
+   - Project Name (ID: uuid...)
 
-3. **Check bot receives webhook:**
+✨ Creating test task in project: Project Name
+
+👥 Looking up your user...
+   ✅ Found: Your Name (uuid...)
+
+✅ Task created successfully!
+   Issue ID: uuid...
+   Sequence: #79
+   URL: https://plane.hhivp.com/...
+
+📝 Adding test comments...
+   ✅ Comment 1 added: uuid...
+   ✅ Comment 2 added: uuid...
+
+📝 Next steps:
+   1. Переведи задачу #79 в статус 'Done'
+   2. Бот создаст TaskReport и отправит уведомление
+   3. Проверь автозаполнение всех полей
+   4. Нажми 'Preview' → Edit → Return to preview
+```
+
+**Script Features:**
+- Auto-fills **description** from template (testing plan)
+- Auto-fills **assignees** (finds user by email: zarudesu@gmail.com)
+- Adds **2 realistic comments** (work description + details)
+- Priority set to **high** for testing
+
+**What to Test After Creation:**
+
+1. **Mark task as Done in Plane UI**
+
+2. **Check bot receives webhook:**
 ```bash
 make bot-logs | grep "task-completed"
 ```
 
-4. **Fill report as admin in Telegram**
+3. **Verify autofill in Telegram:**
+   - Description & comments merged into `report_text`
+   - Workers auto-filled from assignees
+   - Company auto-filled from project name
+
+4. **Fill missing fields:**
+   - Duration: 2 hours
+   - Travel: No (remote)
+   - Company: (should be pre-filled)
+   - Workers: (should be pre-filled)
 
 5. **Verify integrations:**
-   - ✅ Client receives report
+   - ✅ Client receives report (if chat linked)
    - ✅ Work journal entry created
    - ✅ Google Sheets row added
    - ✅ Group chat notification sent
 
-### Automated Tests
+### Integration Tests
 ```bash
-# Integration test
+# Full end-to-end test
 python3 test_task_reports_flow.py
 
-# Check webhook endpoint
+# Check webhook endpoint directly
 curl -X POST http://localhost:8000/api/webhooks/plane/task-completed \
   -H "Content-Type: application/json" \
   -d @test_webhook_payload.json

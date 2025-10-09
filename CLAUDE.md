@@ -609,8 +609,34 @@ python3 test_email_fix.py          # Email handler isolation
 python3 test_basic.py                      # Basic functionality
 python3 test_daily_tasks_comprehensive.py  # Daily Tasks module
 python3 test_plane_daily_tasks.py          # Plane.so integration
-python3 test_task_reports_flow.py          # Task Reports (NEW)
+python3 test_task_reports_flow.py          # Task Reports end-to-end (NEW)
 ```
+
+### Task Reports Test Script
+
+Create realistic test task in Plane with description, comments & assignees:
+
+```bash
+# Set Plane API token (from SECRETS.md or .env)
+export PLANE_API_TOKEN="plane_api_xxxx"
+
+# Run the test script
+./venv/bin/python /tmp/create_test_task.py
+```
+
+**What it creates:**
+- ✅ Test task with full description (HTML format)
+- ✅ 2 realistic comments in Russian
+- ✅ Auto-assigned to your user (zarudesu@gmail.com)
+- ✅ High priority
+
+**Next steps after running:**
+1. Mark task as "Done" in Plane UI
+2. Check bot notification: `make bot-logs | grep "task-completed"`
+3. Fill report as admin in Telegram
+4. Verify all integrations (client + work_journal + Google Sheets + group)
+
+**📖 Full Testing Guide:** [`docs/guides/task-reports-guide.md#-testing`](docs/guides/task-reports-guide.md#-testing)
 
 ### Manual Testing Checklist
 
