@@ -1,7 +1,7 @@
 # Task Reports Flow - Complete Documentation
 
-**Status:** ✅ Production Ready
-**Last Updated:** 2025-10-08
+**Status:** ✅ Production Ready (Optimized)
+**Last Updated:** 2025-10-09
 **Module:** `app/modules/task_reports/`
 
 ## Overview
@@ -491,6 +491,187 @@ Added complete integration:
 4. ✅ Update admin notification with all statuses
 
 **Result:** Now `approve_send` works IDENTICALLY to "создать запись" flow from main menu.
+
+---
+
+## Performance Optimizations
+
+### Webhook Processing Speed
+
+**Before Optimization:** ~13+ seconds
+**After Optimization:** ~1-2 seconds
+
+### Optimization 1: Removed Duplicate Plane API Calls
+
+**File:** `app/webhooks/server.py:201-260`
+**Commit:** `e072ee2`
+**Date:** 2025-10-09
+
+**Problem:**
+Webhook handler made duplicate Plane API calls that were already executed in `create_task_report_from_webhook()`:
+- `get_issue_details()` - duplicate (line 201)
+- `get_issue_comments()` - duplicate (line 213)
+- `get_all_projects()` - duplicate (line 226)
+
+**Solution:**
+```python
+# ✅ USE DATA FROM task_report (already fetched in create_task_report_from_webhook)
+# No duplicate Plane API calls needed - all data is in task_report
+
+# Project name (from task_report.company - already mapped via COMPANY_MAPPING)
+project_line = ""
+if task_report.company:
+    project_line = f"**Проект:** {escape_md(task_report.company)}\n"
+
+# Workers/Assignees (from task_report.workers - already auto-filled)
+assignees_line = ""
+if task_report.workers:
+    try:
+        workers = json.loads(task_report.workers)
+        if isinstance(workers, list) and workers:
+            workers_text = ", ".join(workers)
+            assignees_line = f"**Исполнители:** {escape_md(workers_text)}\n"
+    except:
+        pass
+
+# Report text preview (if auto-generated)
+report_preview = ""
+if task_report.report_text and len(task_report.report_text.strip()) > 50:
+    report_text = task_report.report_text.strip()
+    if len(report_text) > 200:
+        report_text = report_text[:197] + "..."
+    report_preview = f"\n**📝 Отчёт \\(preview\\):**\n_{escape_md(report_text)}_\n"
+```
+
+**Result:** Reduced API calls from 5-8 to 2-5 per webhook
+
+### Optimization 2: Workspace Members Single Project Fetch
+
+**File:** `app/integrations/plane/users.py:36-44`
+**Commit:** `9e3d2b1`
+**Date:** 2025-10-09
+
+**Problem:**
+`get_workspace_members()` iterated through ALL projects (26 projects) to collect unique members:
+- Made 26 API requests (`/projects/{id}/members/`)
+- Took ~11 seconds (26 × ~400ms per request)
+- Caused n8n webhook timeout (typical timeout: 10-15 seconds)
+
+**Previous Code:**
+```python
+for project in projects:  # ← 26 projects!
+    endpoint = f"/api/v1/workspaces/{workspace}/projects/{project.id}/members/"
+    data = await self.client.get(session, endpoint)
+    # ... process members
+```
+
+**Optimized Code:**
+```python
+# OPTIMIZATION: All projects have same members, fetch from first project only
+bot_logger.info(f"📋 Found {len(projects)} projects, fetching members from FIRST project only (optimization)")
+
+# Try only FIRST project (members are same across all projects)
+for project in projects[:1]:  # ← ONLY FIRST PROJECT
+    endpoint = f"/api/v1/workspaces/{workspace}/projects/{project.id}/members/"
+    data = await self.client.get(session, endpoint)
+    # ... process members
+```
+
+**Rationale:**
+Per user feedback: "У нас одинаковые участники во всех проектах" (We have the same members in all projects)
+
+**Result:**
+- **26 API calls → 1 API call**
+- **~11 seconds → ~500ms** (22x faster)
+- Webhook completes in <3 seconds (no more n8n timeouts)
+
+### Infrastructure Configuration
+
+**Webhook Server:**
+- Port: `8083:8080` (container:host)
+- Reason: Ports 8080-8082 used by NetBox and other services
+- Location: `docker-compose.prod.yml:45-46`
+
+**Nginx Reverse Proxy:**
+- Domain: `https://n8n.hhivp.com`
+- Path: `/bot/` → `http://127.0.0.1:8083/`
+- Config: `/etc/nginx/sites-available/n8n.hhivp.com`
+
+```nginx
+# Bot webhooks proxy
+location /bot/ {
+    proxy_pass http://127.0.0.1:8083/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 60;
+    proxy_connect_timeout 60;
+    proxy_send_timeout 60;
+}
+```
+
+**n8n Webhook URL:**
+```
+https://n8n.hhivp.com/bot/webhooks/task-completed
+```
+
+**Benefits:**
+- ✅ No Docker network complexity (n8n-ready_default not needed)
+- ✅ Global nginx handles SSL/TLS
+- ✅ Standard port 443 (HTTPS)
+- ✅ Easy to monitor and debug
+- ✅ Can add rate limiting, IP filtering, etc. at nginx level
+
+### Performance Testing Results
+
+**Test Webhook Payload:**
+```json
+{
+  "plane_issue_id": "test-999",
+  "plane_sequence_id": 999,
+  "plane_project_id": "4df07960-f664-4aba-a757-94a1106c9bae",
+  "task_title": "TEST Webhook Optimization",
+  "task_description": "Testing optimized webhook",
+  "closed_by": {
+    "display_name": "Zardes",
+    "first_name": "Konstantin",
+    "email": "zarudesu@gmail.com"
+  },
+  "closed_at": "2025-10-09T22:00:00Z"
+}
+```
+
+**Before Optimization:**
+```
+Total time: ~13+ seconds
+- Webhook received: 21:18:11
+- get_workspace_members() started: 21:18:13
+- get_workspace_members() completed: 21:18:24 (11 seconds!)
+- Notification sent: 21:18:24
+Result: n8n timeout error
+```
+
+**After Optimization:**
+```
+Total time: ~1.05 seconds
+HTTP Status: 200
+Response: {"status": "processed", "task_report_id": 3, "plane_sequence_id": 999}
+
+Breakdown:
+- Webhook received: 22:36:57
+- TaskReport created: 22:36:57 (instant)
+- Plane data fetched: 22:36:57-22:36:58 (~1s)
+- Notification sent: 22:36:58
+Result: ✅ Success, no timeout
+```
+
+**Performance Gain:**
+- **13x faster** (13s → 1s)
+- **n8n timeout eliminated**
+- **Plane API rate limiting avoided** (26 calls → 1 call)
 
 ---
 

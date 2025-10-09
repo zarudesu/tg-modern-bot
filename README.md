@@ -88,12 +88,15 @@ LOG_LEVEL=INFO
 
 ### Task Reports:
 - ✅ Автоматическое создание отчетов при закрытии задач в Plane
-- ✅ Webhook интеграция с n8n
+- ✅ Webhook интеграция с n8n (`https://n8n.hhivp.com/bot/webhooks/task-completed`)
 - ✅ Автозаполнение данных из Plane (название, описание, комментарии, исполнители)
 - ✅ Маппинг компаний (HarzLabs → Харц Лабз и др.)
 - ✅ Независимое редактирование полей
 - ✅ Preview button flow
 - ✅ Интеграция с Google Sheets и уведомлениями в группу
+- ⚡ **Оптимизировано:** обработка webhook ~1 секунда (было 13+ секунд)
+  - Удалены дублирующие Plane API calls
+  - Workspace members: 1 запрос вместо 26 запросов
 
 📚 **Документация:** [docs/TASK_REPORTS_FLOW.md](docs/TASK_REPORTS_FLOW.md)
 
@@ -166,10 +169,52 @@ class YourCustomFilter(BaseFilter):
 ### Docker (рекомендуемый):
 ```bash
 # Производство
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d
 
 # Разработка
-docker-compose up -d
+docker compose up -d
+```
+
+**⚠️ Важно:** Используйте `docker compose` (v2), а не `docker-compose` (v1).
+
+### Webhook Server (Production):
+
+**Порты:**
+- Контейнер: `8080` (внутренний)
+- Хост: `8083` (внешний, порты 8080-8082 заняты)
+
+**Nginx Configuration:**
+```nginx
+# /etc/nginx/sites-available/n8n.hhivp.com
+
+location /bot/ {
+    proxy_pass http://127.0.0.1:8083/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 60;
+    proxy_connect_timeout 60;
+    proxy_send_timeout 60;
+}
+```
+
+**Webhook Endpoints:**
+- Root: `https://n8n.hhivp.com/bot/`
+- Task Reports: `https://n8n.hhivp.com/bot/webhooks/task-completed`
+- Health Check: `https://n8n.hhivp.com/bot/health`
+
+**Тестирование:**
+```bash
+# Health check
+curl https://n8n.hhivp.com/bot/health
+
+# Test webhook
+curl -X POST https://n8n.hhivp.com/bot/webhooks/task-completed \
+  -H "Content-Type: application/json" \
+  -d '{"plane_issue_id":"test-123","plane_sequence_id":123,...}'
 ```
 
 ### Системный сервис:
