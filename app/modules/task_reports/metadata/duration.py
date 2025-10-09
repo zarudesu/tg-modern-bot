@@ -241,6 +241,39 @@ async def handle_custom_duration(message: Message, state: FSMContext):
             await message.reply("❌ Максимальное время: 1440 минут (24 часа)")
             return
 
+        # Проверяем, нужно ли подтверждение (число <= 13 может быть часами)
+        if text.isdigit() and int(text) <= 13:
+            # Показываем подтверждение
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            keyboard_buttons = []
+
+            # Опция: минуты
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text=f"✅ {duration_minutes} минут",
+                    callback_data=f"tr_duration:{task_report_id}:{duration_minutes} мин"
+                )
+            ])
+
+            # Опция: часы (если <= 13)
+            if int(text) <= 13:
+                hours_minutes = int(text) * 60
+                hours_text = f"{text} ч"
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        text=f"🕒 {hours_text} ({hours_minutes} мин)",
+                        callback_data=f"tr_duration:{task_report_id}:{hours_text}"
+                    )
+                ])
+
+            await message.reply(
+                f"🤔 <b>Уточните время</b>\n\nВы ввели: <b>{text}</b>\n\nЧто вы имели в виду?",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
+                parse_mode="HTML"
+            )
+            return
+
         # Форматируем время
         if duration_minutes < 60:
             formatted_duration = f"{duration_minutes} мин"
