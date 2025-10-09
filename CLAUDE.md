@@ -34,9 +34,20 @@ make dev
 ```
 
 ### If Already Running
+
+**Local dev (bot_manager.sh):**
 ```bash
-make dev-restart  # Fast restart (most common)
+make dev-restart  # Fast restart
 make bot-logs     # View logs
+```
+
+**Docker deployment:**
+```bash
+# Apply code changes (REBUILD required!)
+docker-compose build telegram-bot && docker-compose up -d telegram-bot
+
+# View logs
+docker logs telegram-bot-app-full -f
 ```
 
 ---
@@ -550,9 +561,22 @@ make db-shell  # Test connection
 ```
 
 **Changes not applied:**
+
+Depends on your setup:
+
 ```bash
-make dev-restart  # Restart with new code
+# If running in Docker (production/staging):
+docker-compose build telegram-bot  # Rebuild bot image with new code
+docker-compose up -d telegram-bot  # Restart container
+
+# Alternative: rebuild & restart in one command
+docker-compose up -d --build telegram-bot
+
+# If running locally (dev):
+make dev-restart  # Restart bot process only
 ```
+
+⚠️ **Important:** `make dev-restart` does NOT rebuild Docker images! For containerized deployments, you MUST rebuild the image to apply code changes.
 
 ### Useful Log Commands
 ```bash
