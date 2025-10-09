@@ -33,14 +33,15 @@ class PlaneUsersManager:
                 bot_logger.warning("⚠️ No projects found, cannot get workspace members")
                 return []
 
-            bot_logger.info(f"📋 Found {len(projects)} projects, fetching members from each...")
+            # OPTIMIZATION: All projects have same members, fetch from first project only
+            bot_logger.info(f"📋 Found {len(projects)} projects, fetching members from FIRST project only (optimization)")
 
-            # Collect unique members from all projects
             members_dict = {}  # user_id -> PlaneUser
             successful_projects = 0
             failed_projects = 0
 
-            for project in projects:
+            # Try only FIRST project (members are same across all projects)
+            for project in projects[:1]:  # ← ONLY FIRST PROJECT
                 try:
                     # Get members for this project
                     endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project.id}/members/"
