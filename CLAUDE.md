@@ -43,8 +43,12 @@ make bot-logs     # View logs
 
 **Docker deployment:**
 ```bash
-# Apply code changes (REBUILD required!)
-docker-compose build telegram-bot && docker-compose up -d telegram-bot
+# Apply code changes (FULL REBUILD without cache!)
+docker-compose build --no-cache telegram-bot
+docker-compose up -d --force-recreate telegram-bot
+
+# Or single command (for specific service):
+docker-compose up -d --build --force-recreate --no-deps telegram-bot
 
 # View logs
 docker logs telegram-bot-app-full -f
@@ -566,17 +570,23 @@ Depends on your setup:
 
 ```bash
 # If running in Docker (production/staging):
-docker-compose build telegram-bot  # Rebuild bot image with new code
-docker-compose up -d telegram-bot  # Restart container
+# Step 1: Rebuild WITHOUT cache (important!)
+docker-compose build --no-cache telegram-bot
 
-# Alternative: rebuild & restart in one command
-docker-compose up -d --build telegram-bot
+# Step 2: Force recreate container
+docker-compose up -d --force-recreate telegram-bot
+
+# Alternative: single command (rebuilds but may use cache for some layers)
+docker-compose up -d --build --force-recreate --no-deps telegram-bot
 
 # If running locally (dev):
 make dev-restart  # Restart bot process only
 ```
 
-⚠️ **Important:** `make dev-restart` does NOT rebuild Docker images! For containerized deployments, you MUST rebuild the image to apply code changes.
+⚠️ **Important:**
+- `make dev-restart` does NOT rebuild Docker images!
+- `docker-compose build` without `--no-cache` may use cached layers and NOT apply code changes
+- Always use `--no-cache` flag when rebuilding after code changes
 
 ### Useful Log Commands
 ```bash
