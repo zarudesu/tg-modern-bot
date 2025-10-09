@@ -88,11 +88,56 @@ class PlaneTasksManager:
                 comments = data['results']
 
             bot_logger.info(f"✅ Retrieved {len(comments)} comments for {issue_id}")
+
+            # DEBUG: Log first comment structure to understand Plane API response
+            if comments:
+                bot_logger.debug(f"📋 First comment keys: {list(comments[0].keys())}")
+                bot_logger.debug(f"📋 First comment FULL: {comments[0]}")
+
             return comments
 
         except Exception as e:
             bot_logger.error(f"❌ Error fetching issue comments: {e}")
             return []
+
+    async def create_issue_comment(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        issue_id: str,
+        comment: str
+    ) -> Optional[Dict]:
+        """
+        Create a comment on an issue
+
+        Args:
+            session: aiohttp session
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+            comment: Comment text
+
+        Returns:
+            Created comment object or None
+        """
+        try:
+            endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/{issue_id}/comments/"
+
+            # Plane requires comment_html for rich text
+            comment_html = f"<p>{comment}</p>" if comment else ""
+
+            payload = {
+                "comment_html": comment_html
+            }
+
+            bot_logger.info(f"💬 Creating comment on issue: {issue_id[:8]}...")
+            data = await self.client.post(session, endpoint, json_data=payload)
+
+            bot_logger.info(f"✅ Comment created: {data.get('id', 'N/A')[:8]}...")
+            return data
+
+        except Exception as e:
+            bot_logger.error(f"❌ Error creating comment: {e}")
+            return None
 
     async def get_user_tasks(
         self,
@@ -402,9 +447,12 @@ class PlaneTasksManager:
             endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/"
 
             # Prepare issue data
+            # Plane requires description_html for rich text
+            description_html = f"<p>{description}</p>" if description else ""
+
             issue_data = {
                 "name": name,
-                "description": description,
+                "description_html": description_html,
                 "priority": priority,
             }
 

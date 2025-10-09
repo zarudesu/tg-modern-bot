@@ -292,6 +292,39 @@ class PlaneAPI:
             bot_logger.error(f"Error getting issue comments: {e}")
             return []
 
+    async def create_issue_comment(
+        self,
+        project_id: str,
+        issue_id: str,
+        comment: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a comment on an issue
+
+        Args:
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+            comment: Comment text
+
+        Returns:
+            Created comment object or None
+        """
+        if not self.configured:
+            bot_logger.error("Plane API not configured")
+            return None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.create_issue_comment(
+                    session=session,
+                    project_id=project_id,
+                    issue_id=issue_id,
+                    comment=comment
+                )
+        except Exception as e:
+            bot_logger.error(f"Error creating comment: {e}")
+            return None
+
 
 # Create global instance using settings
 from ...config import settings

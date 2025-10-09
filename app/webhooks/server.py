@@ -192,6 +192,12 @@ class WebhookServer:
                     f"Plane issue {task_report.plane_sequence_id}"
                 )
 
+                # BUG FIX #4: Refresh task_report from database to get updated description
+                # (create_task_report_from_webhook calls fetch_and_generate_report_from_plane
+                # which updates task_description from Plane API and commits)
+                await session.refresh(task_report)
+                bot_logger.info(f"🔄 Refreshed task_report from DB, description length: {len(task_report.task_description) if task_report.task_description else 0}")
+
                 # 📥 FETCH PLANE DATA (comments, assignees, priority, project name)
                 from ..integrations.plane import plane_api
 

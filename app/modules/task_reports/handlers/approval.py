@@ -221,10 +221,123 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
                 # Mark as sent
                 await task_reports_service.mark_sent_to_client(session, task_report_id)
 
-                # Notify admin
+                # BUG FIX #5: Add Google Sheets integration (missing in approve_send)
+                # This should mirror approve_only handler (lines 312-385)
+
+                # Validate required fields before work_journal creation
+                if not task_report.company:
+                    await callback.answer("❌ Компания не указана", show_alert=True)
+                    return
+
+                if not task_report.work_duration:
+                    await callback.answer("❌ Длительность не указана", show_alert=True)
+                    return
+
+                if not task_report.workers:
+                    await callback.answer("❌ Исполнители не указаны", show_alert=True)
+                    return
+
+                # Parse workers JSON
+                workers_list = []
+                if task_report.workers:
+                    try:
+                        workers_list = json.loads(task_report.workers)
+                    except Exception as e:
+                        bot_logger.warning(f"Failed to parse workers JSON: {e}")
+
+                # Get user info
+                from ....database.models import BotUser
+                user = await session.get(BotUser, callback.from_user.id)
+
+                if user:
+                    creator_name = f"@{user.username}" if user.username else (user.first_name or f"User_{callback.from_user.id}")
+                    user_email = f"{user.username}@example.com" if user.username else f"user_{callback.from_user.id}@telegram.bot"
+                else:
+                    creator_name = f"User_{callback.from_user.id}"
+                    user_email = f"user_{callback.from_user.id}@telegram.bot"
+
+                # Create work journal entry
+                wj_service = work_journal_service.WorkJournalService(session)
+                work_date = task_report.closed_at.date() if task_report.closed_at else datetime.now().date()
+
+                bot_logger.info(
+                    f"📝 Creating work_journal entry for task report #{task_report_id}: "
+                    f"date={work_date}, company={task_report.company}, duration={task_report.work_duration}"
+                )
+
+                entry = await wj_service.create_work_entry(
+                    telegram_user_id=callback.from_user.id,
+                    user_email=user_email,
+                    work_date=work_date,
+                    company=task_report.company,
+                    work_duration=task_report.work_duration,
+                    work_description=task_report.report_text or "",
+                    is_travel=task_report.is_travel or False,
+                    worker_names=workers_list,
+                    created_by_user_id=callback.from_user.id,
+                    created_by_name=creator_name
+                )
+
+                # Link to task report
+                task_report.work_journal_entry_id = entry.id
+                await session.commit()
+
+                bot_logger.info(
+                    f"✅ Created work_journal entry #{entry.id} linked to task report #{task_report_id}"
+                )
+
+                # Send to n8n (Google Sheets)
+                try:
+                    from ....services.n8n_integration_service import N8nIntegrationService
+
+                    user_data = {
+                        "first_name": user.first_name if user else callback.from_user.first_name,
+                        "username": user.username if user else callback.from_user.username
+                    }
+
+                    n8n_service = N8nIntegrationService()
+                    bot_logger.info(f"📊 Sending entry {entry.id} to n8n for Google Sheets sync")
+                    success = await n8n_service.send_with_retry(entry, user_data, session)
+                    if success:
+                        bot_logger.info(f"✅ Successfully sent entry {entry.id} to n8n (Google Sheets)")
+                    else:
+                        bot_logger.error(f"❌ Failed to send entry {entry.id} to n8n after retries")
+                except Exception as e:
+                    bot_logger.error(f"Error sending to n8n for entry {entry.id}: {e}")
+                    # Don't stop the process, entry is already saved
+
+                # Send group chat notification with worker mentions
+                try:
+                    from ....services.worker_mention_service import WorkerMentionService
+
+                    if settings.work_journal_group_chat_id:
+                        bot_logger.info(f"📢 Sending group notification for entry {entry.id}")
+                        mention_service = WorkerMentionService(session, callback.bot)
+
+                        success, errors = await mention_service.send_work_assignment_notifications(
+                            entry, creator_name, settings.work_journal_group_chat_id
+                        )
+
+                        if success:
+                            bot_logger.info(f"✅ Successfully sent group notification for entry {entry.id}")
+
+                        if errors:
+                            for error in errors[:2]:
+                                bot_logger.warning(f"Group notification error: {error}")
+                    else:
+                        bot_logger.warning("WORK_JOURNAL_GROUP_CHAT_ID not configured - skipping group notification")
+
+                except Exception as e:
+                    bot_logger.error(f"Error sending group notifications: {e}")
+                    # Don't stop the process
+
+                # Notify admin with full details
                 await callback.message.edit_text(
                     f"✅ **Отчёт одобрен и отправлен клиенту!**\n\n"
-                    f"Задача #{task_report.plane_sequence_id} завершена.",
+                    f"Задача #{task_report.plane_sequence_id} завершена.\n\n"
+                    f"📋 Отчёт отправлен в чат клиента (reply)\n"
+                    f"📊 Данные сохранены в Google Sheets\n"
+                    f"👥 Уведомление отправлено в группу",
                     reply_markup=get_back_to_main_menu_keyboard(),
                     parse_mode="Markdown"
                 )
@@ -281,6 +394,10 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
 
             if not task_report.work_duration:
                 await callback.answer("❌ Длительность не указана", show_alert=True)
+                return
+
+            if not task_report.workers:
+                await callback.answer("❌ Исполнители не указаны", show_alert=True)
                 return
 
             # Approve report

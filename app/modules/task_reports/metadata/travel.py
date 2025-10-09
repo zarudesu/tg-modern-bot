@@ -54,34 +54,58 @@ async def callback_work_type(callback: CallbackQuery, state: FSMContext):
                 is_travel=is_travel
             )
 
-        # Move to company selection
-        await state.set_state(TaskReportStates.filling_company)
-
-        # Get companies from work_journal
-        async for session in get_async_session():
-            wj_service = work_journal_service.WorkJournalService(session)
-            companies = await wj_service.get_companies()
-
-        # Get Plane company from FSM state
+        # Check if we're in editing mode
         state_data = await state.get_data()
-        plane_company = state_data.get("plane_project_name")
+        editing_mode = state_data.get('editing_mode', False)
 
-        # Show company keyboard
-        keyboard = create_company_keyboard(
-            companies=companies,
-            task_report_id=task_report_id,
-            plane_company=plane_company
-        )
+        if editing_mode:
+            # Return to preview after editing - trigger preview callback
+            bot_logger.info(f"📝 Editing mode: returning to preview after work type update")
 
-        await callback.message.edit_text(
-            f"✅ Тип работы: **{work_type_display}**\n\n"
-            f"🏢 **Выберите компанию**\n\n"
-            f"{'_Первой показана компания из Plane_' if plane_company else ''}",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
 
-        await callback.answer()
+            # Trigger preview_report callback
+            from aiogram.types import CallbackQuery as FakeCallback
+            fake_callback = type('obj', (object,), {
+                'data': f'preview_report:{task_report_id}',
+                'from_user': callback.from_user,
+                'message': callback.message,
+                'answer': callback.answer
+            })()
+
+            # Import and call preview handler
+            from ..handlers.preview import callback_preview_report
+            await callback_preview_report(fake_callback)
+            return
+        else:
+            # Continue to next step (company selection)
+            await state.set_state(TaskReportStates.filling_company)
+
+            # Get companies from work_journal
+            async for session in get_async_session():
+                wj_service = work_journal_service.WorkJournalService(session)
+                companies = await wj_service.get_companies()
+
+            # Get Plane company from FSM state
+            plane_company = state_data.get("plane_project_name")
+
+            # Show company keyboard
+            keyboard = create_company_keyboard(
+                companies=companies,
+                task_report_id=task_report_id,
+                plane_company=plane_company
+            )
+
+            await callback.message.edit_text(
+                f"✅ Тип работы: **{work_type_display}**\n\n"
+                f"🏢 **Выберите компанию**\n\n"
+                f"{'_Первой показана компания из Plane_' if plane_company else ''}",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
+            await callback.answer()
 
     except Exception as e:
         bot_logger.error(f"❌ Error in work_type callback: {e}")

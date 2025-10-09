@@ -57,46 +57,70 @@ async def callback_company(callback: CallbackQuery, state: FSMContext):
                 company=company
             )
 
-        # Move to workers selection
-        await state.set_state(TaskReportStates.filling_workers)
-
-        # Get workers from work_journal
-        async for session in get_async_session():
-            wj_service = work_journal_service.WorkJournalService(session)
-            workers = await wj_service.get_workers()
-
-        # Get Plane assignees from FSM state
+        # Check if we're in editing mode
         state_data = await state.get_data()
-        plane_assignees = state_data.get("plane_assignees", [])
+        editing_mode = state_data.get('editing_mode', False)
 
-        # Auto-select Plane assignees on first show
-        selected_workers = plane_assignees.copy() if plane_assignees else []
+        if editing_mode:
+            # Return to preview after editing - trigger preview callback
+            bot_logger.info(f"📝 Editing mode: returning to preview after company update")
 
-        # Save to FSM state
-        await state.update_data(selected_workers=selected_workers)
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
 
-        bot_logger.info(
-            f"📋 Auto-selected Plane assignees for task report #{task_report_id}: {selected_workers}"
-        )
+            # Trigger preview_report callback
+            from aiogram.types import CallbackQuery as FakeCallback
+            fake_callback = type('obj', (object,), {
+                'data': f'preview_report:{task_report_id}',
+                'from_user': callback.from_user,
+                'message': callback.message,
+                'answer': callback.answer
+            })()
 
-        # Show workers keyboard
-        keyboard = create_workers_keyboard(
-            workers=workers,
-            task_report_id=task_report_id,
-            selected_workers=selected_workers,  # Auto-selected from Plane
-            plane_assignees=plane_assignees
-        )
+            # Import and call preview handler
+            from ..handlers.preview import callback_preview_report
+            await callback_preview_report(fake_callback)
+            return
+        else:
+            # Continue to next step (workers selection)
+            await state.set_state(TaskReportStates.filling_workers)
 
-        await callback.message.edit_text(
-            f"✅ Компания: **{company}**\n\n"
-            f"👥 **Выберите исполнителей**\n\n"
-            f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
-            f"Можно выбрать несколько:",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+            # Get workers from work_journal
+            async for session in get_async_session():
+                wj_service = work_journal_service.WorkJournalService(session)
+                workers = await wj_service.get_workers()
 
-        await callback.answer()
+            # Get Plane assignees from FSM state
+            plane_assignees = state_data.get("plane_assignees", [])
+
+            # Auto-select Plane assignees on first show
+            selected_workers = plane_assignees.copy() if plane_assignees else []
+
+            # Save to FSM state
+            await state.update_data(selected_workers=selected_workers)
+
+            bot_logger.info(
+                f"📋 Auto-selected Plane assignees for task report #{task_report_id}: {selected_workers}"
+            )
+
+            # Show workers keyboard
+            keyboard = create_workers_keyboard(
+                workers=workers,
+                task_report_id=task_report_id,
+                selected_workers=selected_workers,  # Auto-selected from Plane
+                plane_assignees=plane_assignees
+            )
+
+            await callback.message.edit_text(
+                f"✅ Компания: **{company}**\n\n"
+                f"👥 **Выберите исполнителей**\n\n"
+                f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
+                f"Можно выбрать несколько:",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
+            await callback.answer()
 
     except Exception as e:
         bot_logger.error(f"❌ Error in company callback: {e}")

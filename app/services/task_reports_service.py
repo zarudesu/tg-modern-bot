@@ -32,7 +32,20 @@ class TaskReportsService:
 
     # Static mapping: Plane display_name/email → Telegram data
     PLANE_TO_TELEGRAM_MAP = {
+        # Zardes / Костя Макейкин / Константин Макейкин
         "Zardes": {
+            "telegram_username": "zardes",
+            "telegram_id": 28795547
+        },
+        "Костя": {
+            "telegram_username": "zardes",
+            "telegram_id": 28795547
+        },
+        "Константин Макейкин": {
+            "telegram_username": "zardes",
+            "telegram_id": 28795547
+        },
+        "Костя Макейкин": {
             "telegram_username": "zardes",
             "telegram_id": 28795547
         },
@@ -40,11 +53,34 @@ class TaskReportsService:
             "telegram_username": "zardes",
             "telegram_id": 28795547
         },
-        # Add more admins here as needed
-        # "Another Admin": {
-        #     "telegram_username": "username",
-        #     "telegram_id": 123456789
-        # }
+
+        # Дима Гусев
+        "Дима Гусев": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+        "Дима": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+        "gen.director@hhivp.com": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+
+        # Тимофей Батырев
+        "Тимофей Батырев": {
+            "telegram_username": "timofey_batyrev",
+            "telegram_id": 56994156
+        },
+        "Тимофей": {
+            "telegram_username": "timofey_batyrev",
+            "telegram_id": 56994156
+        },
+        "tim.4ud@gmail.com": {
+            "telegram_username": "timofey_batyrev",
+            "telegram_id": 56994156
+        },
     }
 
     def map_plane_user_to_telegram(
@@ -197,7 +233,7 @@ class TaskReportsService:
                 f"Plane issue {task_report.plane_sequence_id}"
             )
 
-            # Fetch comments and description from Plane API
+            # Fetch comments and description from Plane API AND auto-fill metadata
             await self.fetch_and_generate_report_from_plane(session, task_report)
 
             # Try to autofill from work_journal (as fallback if Plane data is empty)
@@ -247,7 +283,7 @@ class TaskReportsService:
                 f"📥 Fetching Plane data for issue {task_report.plane_issue_id}"
             )
 
-            # Fetch issue details (for full description)
+            # Fetch issue details (for full description, assignees, project)
             issue_details = await plane_api.get_issue_details(
                 project_id=task_report.plane_project_id,
                 issue_id=task_report.plane_issue_id
@@ -267,6 +303,153 @@ class TaskReportsService:
             if issue_details and issue_details.get('description'):
                 task_report.task_description = issue_details['description']
                 bot_logger.info(f"✅ Updated task description from Plane API")
+
+            # ═════════════════════════════════════════════════════════
+            # AUTO-FILL METADATA FROM PLANE API
+            # ═════════════════════════════════════════════════════════
+            bot_logger.info(f"🔍 issue_details exists: {bool(issue_details)}, type: {type(issue_details)}")
+            if issue_details:
+                bot_logger.info(f"🔍 issue_details keys: {list(issue_details.keys()) if isinstance(issue_details, dict) else 'NOT A DICT'}")
+                from ..modules.task_reports.utils import map_company_name
+
+                # 1. Auto-fill COMPANY from project
+                project_detail = issue_details.get('project_detail') or {}
+                project_name = project_detail.get('name') or issue_details.get('project_name')
+
+                # If no project_name in issue_details, fetch from Plane projects API
+                if not project_name and task_report.plane_project_id:
+                    try:
+                        bot_logger.info(f"📥 Fetching project name for {task_report.plane_project_id[:8]}")
+                        projects = await plane_api.get_all_projects()
+                        for proj in projects:
+                            # projects is list of dicts, not objects
+                            proj_id = proj.get('id') if isinstance(proj, dict) else proj.id
+                            proj_name = proj.get('name') if isinstance(proj, dict) else proj.name
+                            if proj_id == task_report.plane_project_id:
+                                project_name = proj_name
+                                bot_logger.info(f"✅ Found project name: {project_name}")
+                                break
+                    except Exception as e:
+                        bot_logger.warning(f"⚠️ Failed to fetch project name: {e}")
+
+                if project_name and not task_report.company:
+                    # Map company name using COMPANY_MAPPING
+                    mapped_company = map_company_name(project_name)
+                    task_report.company = mapped_company
+                    bot_logger.info(f"🏢 Auto-filled company: '{project_name}' → '{mapped_company}'")
+
+                # 2. Auto-fill WORKERS from assignees OR closed_by
+                assignees_raw = issue_details.get('assignees', [])
+                bot_logger.info(f"🔍 assignees found: {len(assignees_raw)}, type: {type(assignees_raw)}")
+                if assignees_raw:
+                    bot_logger.info(f"🔍 First assignee: {assignees_raw[0] if assignees_raw else 'N/A'}")
+
+                # Extract assignee data (can be list of dicts OR list of UUID strings)
+                assignee_data = []
+                if assignees_raw:
+                    for a in assignees_raw:
+                        if isinstance(a, dict):
+                            # Assignee is already full object with name/email
+                            assignee_data.append(a)
+                        elif isinstance(a, str):
+                            # Assignee is just UUID string, need to look up
+                            assignee_data.append({'id': a})
+                        else:
+                            bot_logger.warning(f"⚠️ Unexpected assignee type: {type(a)}")
+
+                # Fallback to closed_by if no assignees
+                if not assignee_data and task_report.closed_by_plane_name:
+                    bot_logger.info(f"🔄 No assignees, using closed_by: {task_report.closed_by_plane_name}")
+
+                if (assignee_data or task_report.closed_by_plane_name) and not task_report.workers:
+                    try:
+                        worker_names = []
+
+                        # Try to get workers from assignees first
+                        if assignee_data:
+                            bot_logger.info(f"👥 Processing {len(assignee_data)} assignees")
+
+                            # Check if we need to fetch workspace members (only if assignees are UUID strings)
+                            needs_lookup = any('display_name' not in a and 'email' not in a for a in assignee_data)
+
+                            members_by_id = {}
+                            if needs_lookup:
+                                # Get workspace members to map UUIDs to names
+                                workspace_members = await plane_api.get_workspace_members()
+                                bot_logger.info(f"📥 Retrieved {len(workspace_members)} workspace members")
+
+                                # Create ID -> member mapping (PlaneUser objects)
+                                members_by_id = {}
+                                for member in workspace_members:
+                                    if hasattr(member, 'id'):
+                                        # PlaneUser object
+                                        members_by_id[member.id] = {
+                                            'id': member.id,
+                                            'display_name': member.display_name,
+                                            'first_name': member.first_name,
+                                            'email': member.email
+                                        }
+                                    elif isinstance(member, dict) and member.get('id'):
+                                        # Dict format
+                                        members_by_id[member['id']] = member
+
+                            for assignee in assignee_data:
+                                # Get assignee info (either from dict or lookup)
+                                if 'display_name' in assignee or 'email' in assignee:
+                                    # Already have full info
+                                    name = assignee.get('display_name') or assignee.get('first_name', 'Unknown')
+                                    email = assignee.get('email')
+                                else:
+                                    # Need to look up by ID
+                                    assignee_id = assignee.get('id')
+                                    member = members_by_id.get(assignee_id)
+                                    if not member:
+                                        bot_logger.warning(f"⚠️ Assignee {assignee_id[:8]}... not found in workspace")
+                                        continue
+
+                                    name = member.get('display_name') or member.get('first_name', 'Unknown')
+                                    email = member.get('email')
+
+                                # Map Plane user to Telegram (to get normalized names)
+                                telegram_mapping = self.map_plane_user_to_telegram(
+                                    plane_name=name,
+                                    plane_email=email
+                                )
+
+                                # Use mapped telegram_username or original name
+                                final_name = telegram_mapping.get('telegram_username') or name
+                                worker_names.append(final_name)
+                                bot_logger.info(f"👤 Mapped assignee: '{name}' → '{final_name}'")
+
+                        # Fallback to closed_by if no assignees found
+                        elif task_report.closed_by_plane_name:
+                            bot_logger.info(f"🔄 Using closed_by as fallback: {task_report.closed_by_plane_name}")
+
+                            # Map closed_by name through PLANE_TO_TELEGRAM_MAP
+                            telegram_mapping = self.map_plane_user_to_telegram(
+                                plane_name=task_report.closed_by_plane_name,
+                                plane_email=None  # We don't have email for closed_by
+                            )
+
+                            # Use mapped telegram_username or original closed_by name
+                            final_name = telegram_mapping.get('telegram_username') or task_report.closed_by_plane_name
+                            worker_names.append(final_name)
+                            bot_logger.info(f"👤 Mapped closed_by: '{task_report.closed_by_plane_name}' → '{final_name}'")
+
+                        if worker_names:
+                            import json
+                            task_report.workers = json.dumps(worker_names, ensure_ascii=False)
+                            bot_logger.info(f"👥 Auto-filled workers: {worker_names}")
+                        else:
+                            if assignee_ids:
+                                bot_logger.warning(f"⚠️ No workers could be mapped from {len(assignee_ids)} assignees")
+                            elif task_report.closed_by_plane_name:
+                                bot_logger.warning(f"⚠️ Could not map closed_by: {task_report.closed_by_plane_name}")
+                            else:
+                                bot_logger.warning(f"⚠️ No assignees or closed_by found for task")
+
+                    except Exception as e:
+                        bot_logger.error(f"❌ Failed to auto-fill workers from assignees: {e}")
 
             # Generate report text from comments + description
             bot_logger.info(
@@ -345,11 +528,15 @@ class TaskReportsService:
             bot_logger.info(f"🔨 Processing {len(comments)} comments for report generation")
 
             for idx, comment in enumerate(comments, 1):
+                # Debug: Log full comment structure
+                bot_logger.debug(f"  Comment {idx} RAW keys: {list(comment.keys())}")
+                bot_logger.debug(f"  Comment {idx} FULL: {comment}")
+
                 comment_html = comment.get('comment_html', '').strip()
                 comment_plain = comment.get('comment', '').strip()  # BUG FIX #1: Fallback to plain comment
                 bot_logger.debug(
-                    f"  Comment {idx}: has comment_html={bool(comment_html)}, "
-                    f"has comment={bool(comment_plain)}, keys={list(comment.keys())[:5]}"
+                    f"  Comment {idx}: comment_html_type={type(comment_html)}, "
+                    f"comment_plain_type={type(comment_plain)}"
                 )
 
                 # BUG FIX #1: Try comment_html first, then fall back to comment field
@@ -368,9 +555,18 @@ class TaskReportsService:
                     continue
 
                 # Extract actor name (try multiple paths in Plane API)
+                # BUG FIX: actor/created_by can be UUID strings, not dicts
                 actor_detail = comment.get('actor_detail', {})
                 actor = comment.get('actor', {})
                 created_by = comment.get('created_by', {})
+
+                # Ensure they are dicts before calling .get()
+                if not isinstance(actor_detail, dict):
+                    actor_detail = {}
+                if not isinstance(actor, dict):
+                    actor = {}
+                if not isinstance(created_by, dict):
+                    created_by = {}
 
                 # Try all possible name fields from Plane API
                 actor_name = (

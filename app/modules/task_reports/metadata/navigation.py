@@ -171,8 +171,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
 
         # BUG FIX #2: Load existing TaskReport and preserve metadata in state
         async for session in get_async_session():
-            task_reports_service_inst = task_reports_service.TaskReportsService(session)
-            task_report = await task_reports_service_inst.get_task_report(session, task_report_id)
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
 
             if not task_report:
                 await callback.answer("❌ Отчёт не найден", show_alert=True)
@@ -184,14 +183,14 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
                 duration=task_report.work_duration,
                 work_type=task_report.is_travel,
                 company=task_report.company,
-                workers=task_report.worker_names,
+                workers=task_report.workers,
                 editing_mode=True,  # Flag to return to preview after edit
                 editing_field=field_name
             )
 
             bot_logger.info(
                 f"📝 Preserved metadata: duration={task_report.work_duration}, "
-                f"company={task_report.company}, workers={task_report.worker_names}"
+                f"company={task_report.company}, workers={task_report.workers}"
             )
 
         # Route to appropriate handler based on field
@@ -257,6 +256,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             async for session in get_async_session():
                 wj_service = work_journal_service.WorkJournalService(session)
                 workers = await wj_service.get_workers()
+
                 task_report = await task_reports_service.get_task_report(session, task_report_id)
 
             # Get current workers from DB

@@ -305,6 +305,31 @@ async def callback_confirm_workers(callback: CallbackQuery, state: FSMContext):
                 workers=json.dumps(selected_workers)  # Store as JSON array
             )
 
+        # Check if we're in editing mode
+        editing_mode = state_data.get('editing_mode', False)
+
+        if editing_mode:
+            # Return to preview after editing - trigger preview callback
+            bot_logger.info(f"📝 Editing mode: returning to preview after workers update")
+
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
+
+            # Trigger preview_report callback
+            from aiogram.types import CallbackQuery as FakeCallback
+            fake_callback = type('obj', (object,), {
+                'data': f'preview_report:{task_report_id}',
+                'from_user': callback.from_user,
+                'message': callback.message,
+                'answer': callback.answer
+            })()
+
+            # Import and call preview handler
+            from ..handlers.preview import callback_preview_report
+            await callback_preview_report(fake_callback)
+            return
+
+        # Continue with normal flow (initial fill)
         bot_logger.info(
             f"📊 Metadata collected for task #{task_report_id}: "
             f"duration={state_data.get('work_duration')}, "
@@ -331,66 +356,28 @@ async def callback_confirm_workers(callback: CallbackQuery, state: FSMContext):
                 # Перезагружаем task_report после автозаполнения
                 task_report = await task_reports_service.get_task_report(session, task_report_id)
 
-            # Format preview
-            preview = task_report.report_text[:2000] if task_report.report_text else "⚠️ Отчёт не заполнен"
-            if task_report.report_text and len(task_report.report_text) > 2000:
-                preview += "\n\n[...]"
-
-            has_client = bool(task_report.client_chat_id)
-
-            # Format metadata
-            metadata_text = "\n**МЕТАДАННЫЕ РАБОТЫ:**\n"
-            metadata_text += f"⏱️ Длительность: **{task_report.work_duration or '⚠️ Не указано'}**\n"
-            metadata_text += f"🚗 Тип работы: **{'Выезд' if task_report.is_travel else 'Удалённо'}**\n" if task_report.is_travel is not None else "🚗 Тип работы: ⚠️ _Не указано_\n"
-            metadata_text += f"🏢 Компания: **{task_report.company or '⚠️ Не указано'}**\n"
-
-            if task_report.workers:
-                try:
-                    workers_list = json.loads(task_report.workers)
-                    workers_display = ", ".join(workers_list)
-                except:
-                    workers_display = task_report.workers
-                metadata_text += f"👥 Исполнители: **{workers_display}**\n"
-            else:
-                metadata_text += "👥 Исполнители: ⚠️ _Не указано_\n"
-
-            # Build keyboard
-            keyboard_buttons = []
-            if has_client:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text="✅ Одобрить и отправить",
-                        callback_data=f"approve_send:{task_report_id}"
-                    )
-                ])
-            else:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text="✅ Одобрить (без отправки)",
-                        callback_data=f"approve_only:{task_report_id}"
-                    )
-                ])
-
-            keyboard_buttons.extend([
-                [InlineKeyboardButton(
-                    text="✏️ Редактировать",
-                    callback_data=f"edit_report:{task_report_id}"
-                )],
-                [InlineKeyboardButton(
-                    text="❌ Отменить",
-                    callback_data=f"cancel_report:{task_report_id}"
-                )]
-            ])
+            # Show "Preview" button (not the full preview itself)
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
             await callback.message.edit_text(
-                f"👁️ **Предпросмотр отчёта**\n\n"
+                f"✅ **Метаданные собраны!**\n\n"
                 f"**Задача:** #{task_report.plane_sequence_id}\n"
-                f"**Клиент:** {'✅ Есть' if has_client else '⚠️ Нет привязки'}\n\n"
-                f"{metadata_text}\n"
-                f"**ОТЧЁТ ДЛЯ КЛИЕНТА:**\n{preview}\n\n"
-                f"_Клиенту будет отправлен ТОЛЬКО текст отчёта (без метаданных)_",
+                f"⏱️ Длительность: **{task_report.work_duration or '⚠️ Не указано'}**\n"
+                f"🚗 Тип работы: **{'Выезд' if task_report.is_travel else 'Удалённо'}**\n"
+                f"🏢 Компания: **{task_report.company or '⚠️ Не указано'}**\n"
+                f"👥 Исполнители: **{', '.join(selected_workers) if selected_workers else '⚠️ Не указано'}**\n\n"
+                f"{'✅ Отчёт автоматически заполнен из Plane' if task_report.report_text else '⚠️ Отчёт пустой - заполните вручную'}",
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="👁️ Предпросмотр отчёта",
+                        callback_data=f"preview_report:{task_report_id}"
+                    )],
+                    [InlineKeyboardButton(
+                        text="❌ Отменить",
+                        callback_data=f"cancel_report:{task_report_id}"
+                    )]
+                ])
             )
 
             await callback.answer()

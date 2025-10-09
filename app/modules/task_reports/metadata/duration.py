@@ -90,20 +90,44 @@ async def callback_duration(callback: CallbackQuery, state: FSMContext):
                 work_duration=duration
             )
 
-        # Move to work type selection
-        await state.set_state(TaskReportStates.filling_work_type)
+        # Check if we're in editing mode
+        state_data = await state.get_data()
+        editing_mode = state_data.get('editing_mode', False)
 
-        # Show work type keyboard
-        keyboard = create_work_type_keyboard(task_report_id)
+        if editing_mode:
+            # Return to preview after editing - trigger preview callback
+            bot_logger.info(f"📝 Editing mode: returning to preview after duration update")
 
-        await callback.message.edit_text(
-            f"✅ Длительность: **{duration}**\n\n"
-            f"🚗 **Был ли выезд к клиенту?**",
-            parse_mode="Markdown",
-            reply_markup=keyboard
-        )
+            # Clear editing mode flag
+            await state.update_data(editing_mode=False)
 
-        await callback.answer()
+            # Trigger preview_report callback
+            from aiogram.types import CallbackQuery as FakeCallback
+            fake_callback = type('obj', (object,), {
+                'data': f'preview_report:{task_report_id}',
+                'from_user': callback.from_user,
+                'message': callback.message,
+                'answer': callback.answer
+            })()
+
+            # Import and call preview handler
+            from ..handlers.preview import callback_preview_report
+            await callback_preview_report(fake_callback)
+            return
+        else:
+            # Continue to next step (work type selection)
+            await state.set_state(TaskReportStates.filling_work_type)
+
+            keyboard = create_work_type_keyboard(task_report_id)
+
+            await callback.message.edit_text(
+                f"✅ Длительность: **{duration}**\n\n"
+                f"🚗 **Был ли выезд к клиенту?**",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
+            await callback.answer()
 
     except Exception as e:
         bot_logger.error(f"❌ Error in duration callback: {e}")
