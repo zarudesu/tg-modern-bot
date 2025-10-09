@@ -458,7 +458,7 @@ class TaskReportsService:
                 f"comments_count={len(comments) if comments else 0}"
             )
 
-            report_text = self._generate_report_text(
+            report_text = await self._generate_report_text(
                 title=task_report.task_title,
                 description=task_report.task_description,
                 comments=comments,
@@ -487,7 +487,7 @@ class TaskReportsService:
             bot_logger.error(f"❌ Error fetching from Plane API: {e}")
             return False
 
-    def _generate_report_text(
+    async def _generate_report_text(
         self,
         title: Optional[str],
         description: Optional[str],
@@ -527,6 +527,26 @@ class TaskReportsService:
             report_lines.append(f"**Выполненные работы:**\n")
             bot_logger.info(f"🔨 Processing {len(comments)} comments for report generation")
 
+            # FETCH workspace members ONCE for UUID → name mapping
+            members_by_id = {}
+            try:
+                from ..integrations.plane import plane_api
+                if plane_api.configured:
+                    workspace_members = await plane_api.get_workspace_members()
+                    bot_logger.info(f"📥 Retrieved {len(workspace_members)} workspace members for comment authors")
+
+                    for member in workspace_members:
+                        if hasattr(member, 'id'):
+                            members_by_id[member.id] = {
+                                'display_name': member.display_name,
+                                'first_name': member.first_name,
+                                'email': member.email
+                            }
+                        elif isinstance(member, dict) and member.get('id'):
+                            members_by_id[member['id']] = member
+            except Exception as e:
+                bot_logger.warning(f"⚠️ Failed to fetch workspace members for comments: {e}")
+
             for idx, comment in enumerate(comments, 1):
                 # Debug: Log full comment structure
                 bot_logger.debug(f"  Comment {idx} RAW keys: {list(comment.keys())}")
@@ -560,32 +580,58 @@ class TaskReportsService:
                 actor = comment.get('actor', {})
                 created_by = comment.get('created_by', {})
 
-                # Ensure they are dicts before calling .get()
-                if not isinstance(actor_detail, dict):
-                    actor_detail = {}
-                if not isinstance(actor, dict):
-                    actor = {}
-                if not isinstance(created_by, dict):
-                    created_by = {}
+                actor_name = None
+                actor_email = None
 
-                # Try all possible name fields from Plane API
-                actor_name = (
-                    actor_detail.get('display_name') or
-                    actor_detail.get('first_name') or
-                    actor.get('display_name') or
-                    actor.get('first_name') or
-                    created_by.get('display_name') or
-                    created_by.get('first_name') or
-                    'Unknown'
-                )
+                # Try actor_detail first (usually has full info)
+                if isinstance(actor_detail, dict) and actor_detail:
+                    actor_name = actor_detail.get('display_name') or actor_detail.get('first_name')
+                    actor_email = actor_detail.get('email')
 
-                # Log if we got Unknown (for debugging)
-                if actor_name == 'Unknown':
+                # Try actor if actor_detail didn't work
+                if not actor_name:
+                    if isinstance(actor, dict) and actor:
+                        actor_name = actor.get('display_name') or actor.get('first_name')
+                        actor_email = actor.get('email')
+                    elif isinstance(actor, str) and len(actor) > 20:
+                        # actor is a UUID string - look it up
+                        member = members_by_id.get(actor)
+                        if member:
+                            actor_name = member.get('display_name') or member.get('first_name')
+                            actor_email = member.get('email')
+                            bot_logger.debug(f"  🔍 Resolved actor UUID {actor[:8]}... to {actor_name}")
+
+                # Try created_by if still no name
+                if not actor_name:
+                    if isinstance(created_by, dict) and created_by:
+                        actor_name = created_by.get('display_name') or created_by.get('first_name')
+                        actor_email = created_by.get('email')
+                    elif isinstance(created_by, str) and len(created_by) > 20:
+                        # created_by is a UUID string - look it up
+                        member = members_by_id.get(created_by)
+                        if member:
+                            actor_name = member.get('display_name') or member.get('first_name')
+                            actor_email = member.get('email')
+                            bot_logger.debug(f"  🔍 Resolved created_by UUID {created_by[:8]}... to {actor_name}")
+
+                # Apply PLANE_TO_TELEGRAM_MAP to normalize names (Константин Макейкин → zardes)
+                if actor_name:
+                    telegram_mapping = self.map_plane_user_to_telegram(
+                        plane_name=actor_name,
+                        plane_email=actor_email
+                    )
+                    # Use mapped telegram_username or keep original name
+                    mapped_name = telegram_mapping.get('telegram_username')
+                    if mapped_name:
+                        bot_logger.debug(f"  📝 Mapped comment author: '{actor_name}' → '{mapped_name}'")
+                        actor_name = mapped_name
+
+                # Fallback to Unknown
+                if not actor_name:
+                    actor_name = 'Unknown'
                     bot_logger.warning(
                         f"⚠️ Could not extract author name from comment. "
-                        f"actor_detail keys: {list(actor_detail.keys())}, "
-                        f"actor keys: {list(actor.keys())}, "
-                        f"created_by keys: {list(created_by.keys())}"
+                        f"actor_detail={type(actor_detail)}, actor={type(actor)}, created_by={type(created_by)}"
                     )
 
                 # Extract timestamp
