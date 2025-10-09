@@ -76,12 +76,10 @@ async def on_startup(bot: Bot):
         # Загружаем настройки админов из БД
         await dts_module.daily_tasks_service._load_admin_settings_from_db()
         bot_logger.info("Daily tasks service initialized and settings loaded from DB")
-        
-        # Инициализируем кэш сервис задач пользователей
-        from .services.user_tasks_cache_service import user_tasks_cache_service
-        user_tasks_cache_service.bot_instance = bot
-        bot_logger.info("User tasks cache service bot instance set")
-        
+
+        # CACHE DISABLED: Direct API calls instead (rate limit 600/min)
+        # User tasks cache service removed - using direct Plane API calls
+
         # Запуск планировщика ежедневных задач
         global scheduler
         scheduler = None
@@ -112,20 +110,26 @@ async def on_startup(bot: Bot):
         ai_providers_count = ai_manager.providers_count
 
         startup_message = (
-            "🟢 *ENTERPRISE BOT ЗАПУЩЕН\\!*\n\n"
+            "🟢 *HHIVP IT ASSISTANT \\- ЗАПУЩЕН\\!*\n\n"
             f"🤖 *Username:* @{escaped_username}\n"
             f"🆔 *Bot ID:* {bot_info.id}\n"
-            f"📊 *Версия:* v3\\.0 ENTERPRISE\n"
+            f"📊 *Версия:* v3\\.0 PRODUCTION\n"
             f"🕐 *Время запуска:* {escaped_time}\n\n"
-            f"🎯 *ENTERPRISE ВОЗМОЖНОСТИ:*\n"
-            f"🧠 AI Assistant \\- {ai_providers_count} провайдеров\n"
-            f"📡 Event Bus \\- {event_types_count} типов событий\n"
-            f"🔌 Plugin System \\- {plugins_count} плагинов\n"
-            f"📧 Email изоляция для daily\\_tasks\n"
-            f"📋 Work journal с фильтрами\n"
-            f"🔧 Модульная архитектура\n"
-            f"👀 Chat Monitor \\- чтение групп\n"
-            f"🤖 Авто\\-задачи из чатов\n\n"
+            f"🎯 *ОСНОВНЫЕ ВОЗМОЖНОСТИ:*\n\n"
+            f"✈️ *Plane\\.so интеграция:*\n"
+            f"  • Автосоздание задач из email\n"
+            f"  • Просмотр задач по проектам\n"
+            f"  • Синхронизация статусов\n"
+            f"  • Автоотчёты при завершении\n\n"
+            f"📝 *Work Journal:*\n"
+            f"  • Учёт рабочего времени\n"
+            f"  • Выезды и удалённая работа\n"
+            f"  • Синхронизация с Google Sheets\n"
+            f"  • Множественные исполнители\n\n"
+            f"🎫 *Support Requests:*\n"
+            f"  • Приём заявок из групп\n"
+            f"  • Автосоздание задач в Plane\n"
+            f"  • Отчёты клиентам о выполнении\n\n"
             f"✅ *Статус:* Все системы готовы к работе"
         )
         
@@ -244,31 +248,31 @@ async def main():
         from .modules.daily_tasks.router import router as daily_tasks_router
         dp.include_router(daily_tasks_router)
         bot_logger.info("✅ Daily Tasks module loaded (NEW modular version with email priority)")
-        
-        # 3. WORK JOURNAL - НОВЫЕ МОДУЛИ с фильтрами активности
+
+        # 3. Task Reports module - automated client reporting (BEFORE work_journal for FSM priority)
+        from .modules.task_reports.router import router as task_reports_router
+        dp.include_router(task_reports_router)
+        bot_logger.info("✅ Task Reports module loaded (FSM-based report workflow)")
+
+        # 4. WORK JOURNAL - НОВЫЕ МОДУЛИ с фильтрами активности
         from .modules.work_journal.router import router as work_journal_router
         dp.include_router(work_journal_router)
         bot_logger.info("✅ Work Journal module loaded (NEW modular version with state filters)")
-        
-        # 4. Google Sheets Sync
+
+        # 5. Google Sheets Sync
         from .handlers import google_sheets_sync
         dp.include_router(google_sheets_sync.router)
         bot_logger.info("✅ Google Sheets Sync module loaded")
 
-        # 5. AI Assistant module - enterprise AI features
+        # 6. AI Assistant module - enterprise AI features
         from .modules.ai_assistant.router import router as ai_assistant_router
         dp.include_router(ai_assistant_router)
         bot_logger.info("✅ AI Assistant module loaded")
 
-        # 6. Chat Support module - simple request handling from groups (ПЕРЕД chat_monitor!)
+        # 7. Chat Support module - simple request handling from groups (ПЕРЕД chat_monitor!)
         from .modules.chat_support.router import router as chat_support_router
         dp.include_router(chat_support_router)
         bot_logger.info("✅ Chat Support module loaded (simple /request flow)")
-
-        # 7. Task Reports module - automated client reporting for completed tasks
-        from .modules.task_reports.router import router as task_reports_router
-        dp.include_router(task_reports_router)
-        bot_logger.info("✅ Task Reports module loaded (FSM-based report workflow)")
 
         # 8. Chat Monitor module - чтение групповых чатов (ПОСЛЕДНИМ - ловит всё остальное)
         from .modules.chat_monitor.router import router as chat_monitor_router

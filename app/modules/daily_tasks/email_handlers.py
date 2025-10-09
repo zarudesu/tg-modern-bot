@@ -14,18 +14,11 @@ from ...database.database import get_async_session
 from ...database.models import UserSession
 from ...services.daily_tasks_service import daily_tasks_service
 from ...utils.logger import bot_logger
+from ...utils.markdown import escape_markdown_v2
 from ...config import settings
 
 
 router = Router()
-
-
-def escape_markdown_v2(text: str) -> str:
-    """Правильное экранирование для MarkdownV2"""
-    chars_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '@']
-    for char in chars_to_escape:
-        text = text.replace(char, f'\\{char}')
-    return text
 
 
 @router.message(IsAdminEmailFilter())
@@ -71,22 +64,9 @@ async def handle_admin_email_input(message: Message):
             
             # Попробуем сохранить в БД
             save_result = await daily_tasks_service_local._save_admin_settings_to_db()
-            
+
             bot_logger.info(f"✅ Email {email} saved for admin {admin_id}, result: {save_result}")
-            
-            # 🚀 Запускаем background парсинг задач
-            if save_result:
-                from ...services.user_tasks_cache_service import user_tasks_cache_service
-                sync_started = await user_tasks_cache_service.start_user_sync(
-                    user_email=email,
-                    telegram_user_id=admin_id,
-                    notify_user=True
-                )
-                if sync_started:
-                    bot_logger.info(f"🔄 Background sync started for {email}")
-                else:
-                    bot_logger.warning(f"⚠️ Background sync not started for {email} (already in progress?)")
-        
+
             # Обновляем пользовательскую сессию
             result = await session.execute(
                 select(UserSession).where(UserSession.telegram_user_id == admin_id)

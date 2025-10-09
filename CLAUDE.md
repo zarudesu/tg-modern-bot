@@ -2,24 +2,110 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🚧 ACTIVE REFACTORING: Task Reports Module
+---
 
-**Status:** Planning complete, ready to start
-**Branch:** `refactor/task-reports-module` (to be created)
-**Documentation:**
-- `docs/TASK_REPORTS_REFACTORING.md` - Полный план рефакторинга
-- `docs/CURRENT_BUGS.md` - Детальное описание 5 багов
+## 📑 Table of Contents
 
-**Before making ANY changes to task_reports module, read these files first!**
+- [Quick Start](#-quick-start)
+- [Essential Commands](#-essential-commands)
+- [Module Status Dashboard](#-module-status-dashboard)
+- [Architecture Overview](#-architecture-overview)
+- [Development Guide](#-development-guide)
+- [Configuration](#-configuration)
+- [Security & Credentials](#-security--credentials)
+- [Debugging](#-debugging)
+- [Testing Strategy](#-testing-strategy)
+- [References](#-references)
 
-## Essential Commands
+---
+
+## 🚀 Quick Start
+
+### First Time Setup
+```bash
+cd /Users/zardes/Projects/tg-mordern-bot
+
+# Create .env from example
+cp .env.example .env
+# Add your token: TELEGRAM_TOKEN=your_token
+
+# Start database + bot
+make dev
+```
+
+### If Already Running
+
+**⚠️ IMPORTANT: Choose correct workflow based on your setup!**
+
+#### 📍 Local Development (bot_manager.sh)
+```bash
+make dev-restart  # Fast restart (reloads code automatically)
+make bot-logs     # View logs
+```
+
+#### 🐳 Docker Development (code INSIDE container)
+
+**✅ RECOMMENDED: Use Makefile commands**
+```bash
+# After code changes - FULL REBUILD (slow but guaranteed)
+make bot-rebuild-clean    # Only bot (DB must be running)
+make full-rebuild-clean   # Full stack (DB + Redis + Bot)
+
+# View logs
+make bot-logs
+# Or: make full-logs
+```
+
+**Manual Docker commands (if needed):**
+```bash
+# Option 1: Full rebuild (SAFEST after code changes)
+docker-compose build --no-cache telegram-bot
+docker-compose up -d --force-recreate telegram-bot
+
+# Option 2: Faster rebuild (uses cache for unchanged layers)
+docker-compose build telegram-bot
+docker-compose up -d --force-recreate telegram-bot
+
+# View logs
+docker-compose logs -f telegram-bot
+# Or: docker logs telegram-bot-app-full -f
+```
+
+**❌ WRONG - will NOT apply code changes:**
+```bash
+docker-compose restart telegram-bot        # Only restarts OLD container ❌
+docker-compose build telegram-bot          # Builds image but doesn't update container ❌
+docker-compose up -d telegram-bot          # Uses EXISTING container if running ❌
+```
+
+**Why `--force-recreate`?**
+- Our `docker-compose.yml` does NOT mount code as volume (only logs & .env)
+- Code is **baked into Docker image** during build
+- `restart` = restart old container with old code
+- `up -d --force-recreate` = delete old container + create new from fresh image
+
+**Quick Reference:**
+| Scenario | Command |
+|----------|---------|
+| Changed Python code | `make bot-rebuild-clean` or `make full-rebuild-clean` |
+| Changed requirements.txt | `make bot-rebuild-clean` (needs --no-cache) |
+| Changed .env only | `docker-compose restart telegram-bot` (OK) |
+| Changed docker-compose.yml | `docker-compose up -d --force-recreate telegram-bot` |
+
+---
+
+## ⚡ Essential Commands
 
 ### Development Workflow
 ```bash
-# Quick start
+# Local development (fastest, code auto-reload)
 make dev                          # Start database + bot
-make dev-restart                  # Restart bot only
+make dev-restart                  # Restart bot only (FAST)
 make dev-stop                     # Stop everything
+
+# Docker development (code changes require rebuild)
+make bot-rebuild-clean            # Rebuild bot after code changes
+make full-rebuild-clean           # Rebuild full stack after code changes
 
 # Monitoring
 make bot-logs                     # View bot logs (most common)
@@ -42,14 +128,8 @@ make db-backup                    # Create backup
 ### Testing
 ```bash
 python3 test_basic.py             # Basic functionality
-python3 test_modules_isolation.py # Module isolation (CRITICAL)
+python3 test_modules_isolation.py # Module isolation (CRITICAL!)
 python3 test_email_fix.py         # Email filter tests
-
-# Integration testing (локально с продакшн сервисами)
-# 1. Work Journal → n8n → Google Sheets
-# 2. Daily Tasks → Plane.so notifications
-# 3. Group notifications
-# См. SECRETS.md для credentials
 ```
 
 ### Production
@@ -60,34 +140,71 @@ make prod-logs                    # View logs
 make prod-backup                  # Backup database
 ```
 
-## Architecture Overview
+---
+
+## 📊 Module Status Dashboard
+
+| Module | Status | Location | Documentation |
+|--------|--------|----------|---------------|
+| **Task Reports** | ✅ PRODUCTION | `app/modules/task_reports/` | [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md) |
+| **Daily Tasks** | ✅ PRODUCTION | `app/modules/daily_tasks/` | Email → Plane.so automation |
+| **Work Journal** | ✅ PRODUCTION | `app/modules/work_journal/` | Work entries → Google Sheets |
+| **AI Assistant** | 🚧 BETA | `app/modules/ai_assistant/` | OpenAI/Anthropic integration |
+| **Chat Monitor** | 🚧 BETA | `app/modules/chat_monitor/` | Context tracking |
+
+### Task Reports Module (PRODUCTION READY)
+
+**Purpose:** Automated client reporting when support tasks completed in Plane.so
+
+**Quick Flow:**
+```
+Plane task "Done" → n8n webhook → Bot notification → Admin fills report →
+Client receives + Google Sheets + Group notification
+```
+
+**Key Features:**
+- ✅ Auto-fills task data from Plane (title, description, assignees)
+- ✅ Independent field editing (duration, travel, company, workers)
+- ✅ Company mapping (15+ companies: Plane project → Russian names)
+- ✅ Workers autofill from Plane assignees
+- ✅ Complete integration: client chat + work_journal + Google Sheets + group notification
+
+**Recent Fixes:**
+- BUG #5 (2025-10-08): `approve_send` now creates work_journal + Google Sheets sync
+
+**📚 Full Documentation:** [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md)
+
+---
+
+## 🏗️ Architecture Overview
 
 ### Hybrid Structure
+
 The project uses **two architectural approaches**:
 
 ```
 app/
-├── handlers/                # 🎯 Simple handlers (ADD NEW FEATURES HERE)
+├── handlers/                # 🎯 Simple handlers (START HERE for new features)
 │   ├── start.py            # /start, /help, /profile commands
 │   ├── google_sheets_sync.py
-│   └── new_feature.py      # 🆕 Add new simple commands here
+│   └── new_feature.py      # 🆕 Add simple commands here
 │
 ├── modules/                 # 🏗️ Complex modular features (advanced)
-│   ├── daily_tasks/        # Email → Plane.so (admin only, highest priority)
+│   ├── task_reports/       # Client reporting automation (PRODUCTION)
+│   ├── daily_tasks/        # Email → Plane.so (admin only)
 │   ├── work_journal/       # Work entries with state management
 │   └── common/             # Shared module utilities
 │
 ├── services/                # 💼 Business logic
+│   ├── task_reports_service.py
 │   ├── work_journal_service.py
-│   ├── daily_tasks_service.py
-│   └── new_service.py      # 🆕 Add business logic here
+│   └── daily_tasks_service.py
 │
 ├── database/                # 🗄️ SQLAlchemy models + Alembic
-│   ├── models.py           # Core models (User, etc)
+│   ├── models.py           # Core: BotUser
+│   ├── task_reports_models.py
 │   ├── work_journal_models.py
-│   ├── daily_tasks_models.py
-│   ├── database.py         # DB connection
-│   └── new_models.py       # 🆕 Add new models here
+│   └── daily_tasks_models.py
 │
 ├── middleware/              # 🔧 Request processing (rarely modify)
 ├── integrations/            # 🔗 External APIs (Plane, n8n)
@@ -109,245 +226,110 @@ app/
 - **Requires understanding of router priorities**
 
 ### Critical Router Loading Order
-**MUST be maintained** in `app/main.py:186-202`:
+
+**MUST be maintained** in `app/main.py:244-264`:
 
 ```python
 1. start.router              # Common commands (/start, /help)
-2. daily_tasks_router        # Email processing (admin-only)
-3. work_journal_router       # Work entries (state-based)
-4. google_sheets_sync.router # Integration hooks
+2. daily_tasks_router        # Email processing (admin-only, FIRST priority)
+3. task_reports_router       # Client reporting (state-based, NEW)
+4. work_journal_router       # Work entries (state-based)
+5. google_sheets_sync.router # Integration hooks
 ```
+
+⚠️ **Order matters!** Daily Tasks email filter must be first to prevent conflicts.
 
 ### Module Isolation Strategy
 
-#### Daily Tasks (`app/modules/daily_tasks/`)
-**Email processing with highest priority**
+**Each module MUST have filters** to prevent message conflicts.
 
-Router order in `router.py:18-25`:
-1. `email_router` - Admin email → Plane tasks (FIRST)
+#### Example: Daily Tasks (Email Processing)
+```python
+# app/modules/daily_tasks/filters.py
+class IsAdminEmailFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        # Captures emails BEFORE other handlers
+        return is_admin and is_email_format
+```
+
+Router order in `daily_tasks/router.py:18-25`:
+1. `email_router` - Admin email → Plane tasks (FIRST!)
 2. `navigation_router` + `callback_router` - UI interactions
 3. `handlers_router` - Commands (/settings)
 
-Key isolation: `IsAdminEmailFilter` in `filters.py` ensures emails are captured before other handlers
+#### Example: Work Journal (State-based)
+```python
+# app/modules/work_journal/filters.py
+class IsWorkJournalActiveFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        # Only process text during active work journal states
+        return user_state in [DURATION, TRAVEL, COMPANY, ...]
+```
 
-#### Work Journal (`app/modules/work_journal/`)
-**State-managed text processing**
-
-Router order in `router.py:18-24`:
+Router order in `work_journal/router.py:18-24`:
 1. `handlers_router` - Commands (/journal, /history)
 2. `callback_router` - Button callbacks
 3. `text_router` - Text input (LAST, state-filtered only)
 
-Key isolation: `IsWorkJournalActiveFilter` in `filters.py` ensures text only processed during active work journal states
-
 ### Middleware Stack
+
 **Applied in strict order** (`app/main.py:165-181`):
 
-```python
-1. DatabaseSessionMiddleware  # Creates async DB session (FIRST)
-2. PerformanceMiddleware      # Request timing
-3. LoggingMiddleware          # Request/response logging
-4. GroupMonitoringMiddleware  # Group chat tracking
-5. AuthMiddleware             # User authorization (LAST)
-```
+| Order | Middleware | Purpose |
+|-------|-----------|---------|
+| 1 | DatabaseSessionMiddleware | Creates async DB session |
+| 2 | PerformanceMiddleware | Request timing |
+| 3 | LoggingMiddleware | Request/response logging |
+| 4 | GroupMonitoringMiddleware | Group chat tracking |
+| 5 | AuthMiddleware | User authorization |
 
 All middleware applied to both `message` and `callback_query` handlers.
 
 ### Database Architecture
 
-**Stack**: PostgreSQL + Redis, SQLAlchemy async + Alembic
+**Stack:** PostgreSQL + Redis, SQLAlchemy async + Alembic
 
-Key models:
-- `app/database/models.py` - Core: `BotUser`, legacy work journal
-- `app/database/daily_tasks_models.py` - `AdminDailyTasksSettings`, `DailyTasksLog`
-- `app/database/user_tasks_models.py` - `UserTasksCache` for Plane sync
-- `app/database/work_journal_models.py` - Work journal v2 models
-- `app/database/task_reports_models.py` - `TaskReport` for client reports (NEW)
+**Key Models:**
+- `models.py` - Core: `BotUser`, legacy work journal
+- `task_reports_models.py` - `TaskReport` for client reports (NEW)
+- `daily_tasks_models.py` - `AdminDailyTasksSettings`, `DailyTasksLog`
+- `user_tasks_models.py` - `UserTasksCache` for Plane sync
+- `work_journal_models.py` - Work journal v2 models
 
-Migrations: `alembic/versions/` - Run with `alembic upgrade head`
-
-### Task Reports System (NEW)
-
-**Purpose**: Automated client reporting when support requests are completed in Plane.so
-
-When a task is marked as "Done" in Plane:
-1. n8n webhook detects status change → sends to bot
-2. Bot creates TaskReport (pending status)
-3. Admin who closed task gets reminder to fill report
-4. Admin fills report (autofilled from work_journal if available)
-5. Report sent to client in original chat
-
-**Key files**:
-- `app/database/task_reports_models.py` - TaskReport model
-- `alembic/versions/004_add_task_reports.py` - Database migration
-- `docs/TASK_REPORTS_PLAN.md` - Complete implementation plan (400+ lines)
-
-**Status flow**: `pending → draft → approved → sent_to_client`
-
-**Reminder system**: Escalating notifications (1hr → 3hr → 6hr) until report filled
-
-**Integration points**:
-- n8n workflow: "hook from plane to tg + email reply" (ID: Y4fnJHlMGpABXCtq)
-- Plane webhook: Tracks `actor` field (who closed task)
-- Work journal: Auto-fill from recent entries
-- Support requests: Links via `support_request_id` foreign key
-
-**Development status**:
-- ✅ Database models created
-- ✅ Migration ready
-- ✅ Architecture documented
-- ⏳ Service layer pending
-- ⏳ FSM handlers pending
-- ⏳ n8n workflow update pending
-
-See `docs/TASK_REPORTS_PLAN.md` for complete implementation details.
-
-### Configuration
-
-**File**: `app/config.py` (Pydantic Settings)
-
-Required environment variables:
-```bash
-TELEGRAM_TOKEN=bot_token_here
-TELEGRAM_API_ID=12345
-TELEGRAM_API_HASH=hash_here
-ADMIN_USER_IDS=123456789,987654321    # Comma-separated
-DATABASE_URL=postgresql+asyncpg://user:pass@host/db
-REDIS_URL=redis://:pass@host:6379/0
-```
-
-Optional (Plane.so):
-```bash
-PLANE_API_URL=https://plane.example.com
-PLANE_API_TOKEN=token_here
-PLANE_WORKSPACE_SLUG=workspace-slug
-DAILY_TASKS_ENABLED=true
-DAILY_TASKS_TIME=09:00                # HH:MM format
-DAILY_TASKS_TIMEZONE=Europe/Moscow
-```
-
-Optional (integrations):
-```bash
-N8N_WEBHOOK_URL=https://n8n.example.com/webhook/...
-N8N_WEBHOOK_SECRET=secret_here
-GOOGLE_SHEETS_ID=spreadsheet_id_here
-```
+**Migrations:** `alembic/versions/` - Run with `alembic upgrade head`
 
 ### Key Services
 
-**Daily Tasks Service** (`app/services/daily_tasks_service.py`)
+**TaskReportsService** (`app/services/task_reports_service.py`)
+- CRUD operations for TaskReport
+- Auto-fill from Plane API (lines 254-459)
+- Integration with work_journal and n8n
+
+**DailyTasksService** (`app/services/daily_tasks_service.py`)
 - Global singleton initialized in `main.py:46-48`
 - Email parsing → Plane API task creation
 - Scheduled notifications via `scheduler.py`
-- Admin-only access
 
-**Work Journal Service** (`app/services/work_journal_service.py`)
+**WorkJournalService** (`app/services/work_journal_service.py`)
 - CRUD for work entries
 - Company/executor management
 - n8n webhook integration for Google Sheets sync
 
-**User Tasks Cache Service** (`app/services/user_tasks_cache_service.py`)
+**UserTasksCacheService** (`app/services/user_tasks_cache_service.py`)
 - Caches Plane tasks per user
 - Reduces API calls
 - Auto-refresh mechanism
 
-### Adding New Modules
-
-1. **Create structure**:
-```
-app/modules/new_module/
-├── __init__.py
-├── router.py           # Main router
-├── handlers.py         # Command handlers
-├── filters.py          # Custom filters (CRITICAL for isolation)
-└── callback_handlers.py
-```
-
-2. **Implement filters** to prevent conflicts:
-```python
-class YourModuleFilter(BaseFilter):
-    async def __call__(self, message: Message) -> bool:
-        # Return True only for messages this module should handle
-        # Consider: command patterns, user states, message types
-        return should_handle
-```
-
-3. **Add to main router** in `app/main.py` at correct priority position
-
-4. **Test isolation**: Run `python3 test_modules_isolation.py`
-
-### Testing Strategy
-
-**Module isolation is CRITICAL** - always test:
-```bash
-python3 test_modules_isolation.py  # Ensures filters work correctly
-python3 test_email_fix.py          # Email handler isolation
-```
-
-Integration tests:
-```bash
-python3 test_daily_tasks_comprehensive.py
-python3 test_plane_daily_tasks.py
-```
-
-### Common Issues
-
-**Email not being captured by daily_tasks**:
-- Check `IsAdminEmailFilter` in `app/modules/daily_tasks/filters.py`
-- Verify user is in `ADMIN_USER_IDS`
-- Confirm `email_router` is first in `daily_tasks/router.py`
-
-**Text captured by wrong module**:
-- Check state filters in `work_journal/filters.py`
-- Verify router loading order in `main.py`
-- Test with `test_modules_isolation.py`
-
-**Service initialization errors**:
-- `daily_tasks_service` must be initialized in `main.py` startup
-- Check `on_startup()` function completes successfully
-- Review `make bot-logs` for errors
-
-### Bot Management
-
-The bot uses `bot_manager.sh` script (called by Makefile):
-- Manages single process via PID file
-- Handles graceful restarts
-- Logs to `logs/bot_output.log`
-
-Production uses systemd service or Docker containers.
-
 ---
 
-## Quick Start Guide
+## 💡 Development Guide
 
-### First Time Setup
-```bash
-cd /Users/zardes/Projects/tg-mordern-bot
+### Adding New Simple Command
 
-# If .env doesn't exist
-cp .env.example .env
-# Add your token: TELEGRAM_TOKEN=your_token
-
-# Start (database in Docker, bot locally)
-make dev
-```
-
-### If Already Running
-```bash
-cd /Users/zardes/Projects/tg-mordern-bot
-make dev-restart  # Fast restart
-```
-
----
-
-## Creating New Features
-
-### 1. Simple Command Handler
-
-**File**: `app/handlers/new_feature.py`
+**File:** `app/handlers/new_feature.py`
 
 ```python
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
 from ..utils.logger import bot_logger
@@ -371,31 +353,38 @@ async def main():
     # ...rest of code...
 ```
 
-### 2. Command with Inline Keyboard
+### Adding New Module
 
-```python
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-@router.message(Command("menu"))
-async def show_menu(message: Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 Option 1", callback_data="opt1")],
-        [InlineKeyboardButton(text="⚡ Option 2", callback_data="opt2")]
-    ])
-    await message.reply("Choose an option:", reply_markup=keyboard)
-
-@router.callback_query(F.data == "opt1")
-async def handle_option1(callback: CallbackQuery):
-    await callback.message.edit_text("✅ Option 1 selected!")
-    await callback.answer()
+1. **Create structure:**
+```
+app/modules/new_module/
+├── __init__.py
+├── router.py           # Main router
+├── handlers.py         # Command handlers
+├── filters.py          # Custom filters (CRITICAL for isolation)
+├── keyboards.py        # Inline keyboards
+├── states.py           # FSM states (if needed)
+└── callback_handlers.py
 ```
 
-### 3. Working with Database
+2. **Implement filters** to prevent conflicts:
+```python
+class YourModuleFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        # Return True only for messages this module should handle
+        return should_handle
+```
+
+3. **Add to main router** in `app/main.py` at correct priority position
+
+4. **Test isolation**: Run `python3 test_modules_isolation.py`
+
+### Working with Database
 
 ```python
 from sqlalchemy import select
 from ..database.database import async_session
-from ..database.models import User
+from ..database.models import BotUser
 
 @router.message(Command("mydata"))
 async def get_user_data(message: Message):
@@ -403,7 +392,7 @@ async def get_user_data(message: Message):
 
     async with async_session() as session:
         result = await session.execute(
-            select(User).where(User.telegram_id == user_id)
+            select(BotUser).where(BotUser.telegram_id == user_id)
         )
         user = result.scalar_one_or_none()
 
@@ -413,9 +402,9 @@ async def get_user_data(message: Message):
             await message.reply("❌ User not found")
 ```
 
-### 4. Creating New Database Model
+### Creating Database Model & Migration
 
-**File**: `app/database/new_models.py`
+**File:** `app/database/new_models.py`
 
 ```python
 from sqlalchemy import Column, Integer, String, DateTime, Text
@@ -431,18 +420,15 @@ class NewFeature(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 ```
 
-**Create migration**:
+**Create migration:**
 ```bash
-# Inside Docker container
 docker exec -it telegram-bot-app alembic revision --autogenerate -m "Add new feature"
 docker exec -it telegram-bot-app alembic upgrade head
 ```
 
----
+### Useful Utilities
 
-## Useful Utilities
-
-### Logging
+**Logging:**
 ```python
 from ..utils.logger import bot_logger
 
@@ -451,7 +437,7 @@ bot_logger.warning("Warning")
 bot_logger.error("Error")
 ```
 
-### Admin Check
+**Admin Check:**
 ```python
 from ..config import settings
 
@@ -460,7 +446,7 @@ if settings.is_admin(message.from_user.id):
     pass
 ```
 
-### Formatters (Ready-to-use)
+**Formatters:**
 ```python
 from ..utils.work_journal_formatters import format_duration
 from ..utils.formatters import escape_markdown
@@ -474,94 +460,51 @@ safe_text = escape_markdown("Text with *special* characters")
 
 ---
 
-## Database Quick Reference
+## ⚙️ Configuration
 
-### Connection Pattern
-```python
-from ..database.database import async_session
+**File:** `app/config.py` (Pydantic Settings)
 
-async def work_with_db():
-    async with async_session() as session:
-        # Your DB work here
-        await session.commit()
-```
-
-### Existing Models
-- `User` (or `BotUser`) - Bot users
-- `WorkJournalEntry` - Work journal entries
-- `WorkJournalWorker` - Workers
-- `WorkJournalCompany` - Companies
-- `AdminDailyTasksSettings` - Daily tasks config
-- `UserTasksCache` - Cached Plane tasks
-
-### Database Commands
+### Required Environment Variables
 ```bash
-make db-shell     # Connect to PostgreSQL
-make db-backup    # Create backup
-make db-up        # Start database only
+TELEGRAM_TOKEN=bot_token_here
+TELEGRAM_API_ID=12345
+TELEGRAM_API_HASH=hash_here
+ADMIN_USER_IDS=123456789,987654321    # Comma-separated
+DATABASE_URL=postgresql+asyncpg://user:pass@host/db
+REDIS_URL=redis://:pass@host:6379/0
 ```
 
----
-
-## Debugging
-
-### Common Problems
-
-**Bot not responding:**
+### Optional (Plane.so)
 ```bash
-make bot-logs  # Watch logs in real-time
+PLANE_API_URL=https://plane.example.com
+PLANE_API_TOKEN=token_here
+PLANE_WORKSPACE_SLUG=workspace-slug
+DAILY_TASKS_ENABLED=true
+DAILY_TASKS_TIME=09:00                # HH:MM format
+DAILY_TASKS_TIMEZONE=Europe/Moscow
 ```
 
-**Database won't connect:**
+### Optional (Integrations)
 ```bash
-make db-up     # Start DB separately
-make db-shell  # Test connection
+N8N_WEBHOOK_URL=https://n8n.example.com/webhook/...
+N8N_WEBHOOK_SECRET=secret_here
+GOOGLE_SHEETS_ID=spreadsheet_id_here
 ```
 
-**Changes not applied:**
+### Optional (AI Features - Enterprise v3.0)
 ```bash
-make dev-restart  # Restart with new code
+OPENAI_API_KEY=sk-your-openai-key
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
+AI_MODEL=gpt-4-turbo
+AI_TEMPERATURE=0.7
+AI_MAX_TOKENS=2000
 ```
 
-### Useful Log Commands
-```bash
-make bot-logs     # Bot logs
-make status       # Service status
-tail -f logs/bot_output.log  # Direct log file
-```
-
----
-
-## Testing Your Feature
-
-**Create test file**: `test_new_feature.py`
-
-```python
-import asyncio
-from app.handlers.new_feature import handle_new_command
-
-async def test_new_feature():
-    """Test new feature"""
-    print("🧪 Testing new feature...")
-    # Your tests
-    print("✅ Feature working!")
-
-if __name__ == "__main__":
-    asyncio.run(test_new_feature())
-```
-
-**Run**:
-```bash
-python3 test_new_feature.py
-```
-
----
-
-## Configuration
+Without AI API keys, AI features are disabled (bot still works normally).
 
 ### Adding New Settings
 
-**File**: `app/config.py`
+**File:** `app/config.py`
 
 ```python
 class Settings(BaseSettings):
@@ -575,19 +518,10 @@ class Settings(BaseSettings):
         env_file = ".env"
 ```
 
-**In .env file**:
+**In .env file:**
 ```env
 NEW_FEATURE_ENABLED=true
 NEW_API_TOKEN=your_token_here
-```
-
-**Usage**:
-```python
-from ..config import settings
-
-if settings.new_feature_enabled:
-    # feature logic
-    pass
 ```
 
 ---
@@ -596,7 +530,7 @@ if settings.new_feature_enabled:
 
 ### Important Files
 
-**SECRETS.md** - Contains all production credentials and API keys
+**SECRETS.md** - Production credentials and API keys
 - ⚠️ **NEVER commit to git** (in .gitignore)
 - Contains: n8n API key, Plane tokens, bot tokens, etc.
 - Use for local testing with production services
@@ -640,45 +574,197 @@ git check-ignore .env SECRETS.md
 ### Testing Production Integrations Locally
 
 ```bash
-# 1. Copy credentials from SECRETS.md to .env
-cp SECRETS.md .env  # Don't do this literally, copy values manually
+# 1. Copy credentials from SECRETS.md to .env manually
 
 # 2. Start bot
 make dev-restart
 
 # 3. Test Work Journal → n8n → Google Sheets
-# Send /work_journal to @zardes_bot
-# Fill entry and submit
-# Check Google Sheets for new row
+# Send /work_journal to bot → fill entry → check Google Sheets
 
 # 4. Test Daily Tasks → Plane.so
-# Send email-formatted message as admin
-# Check Plane.so for new task
-# Check Telegram group for notification
+# Send email-formatted message as admin → check Plane.so + Telegram group
+
+# 5. Test Task Reports → Client + Google Sheets
+# Mark Plane task as Done → fill report → verify all integrations
 ```
 
 ---
 
-## Enterprise Architecture (v3.0)
+## 🐛 Debugging
+
+### Common Problems
+
+**Bot not responding:**
+```bash
+make bot-logs  # Watch logs in real-time
+```
+
+**Database won't connect:**
+```bash
+make db-up     # Start DB separately
+make db-shell  # Test connection
+```
+
+**Changes not applied:**
+
+See [Quick Start > If Already Running](#if-already-running) for detailed workflow.
+
+**TL;DR:**
+- **Docker:** Must rebuild image + recreate container (NOT just restart!)
+  ```bash
+  make bot-rebuild-clean       # Recommended (Makefile)
+  # Or manually:
+  docker-compose build --no-cache telegram-bot
+  docker-compose up -d --force-recreate telegram-bot
+  ```
+
+- **Local dev:** Code reloads automatically
+  ```bash
+  make dev-restart
+  ```
+
+⚠️ **Common mistakes:**
+- `docker-compose restart` - only restarts OLD container ❌
+- `docker-compose up -d` - doesn't recreate container ❌
+- `docker-compose build` alone - doesn't update running container ❌
+
+✅ **Must use:** `--force-recreate` flag or Makefile commands!
+
+### Useful Log Commands
+```bash
+make bot-logs     # Bot logs (real-time)
+make status       # Service status
+tail -f logs/bot_output.log  # Direct log file
+```
+
+### Module-Specific Issues
+
+**Email not being captured by daily_tasks:**
+- Check `IsAdminEmailFilter` in `app/modules/daily_tasks/filters.py`
+- Verify user is in `ADMIN_USER_IDS`
+- Confirm `email_router` is first in `daily_tasks/router.py`
+
+**Text captured by wrong module:**
+- Check state filters in respective module `filters.py`
+- Verify router loading order in `main.py`
+- Test with `test_modules_isolation.py`
+
+**Service initialization errors:**
+- Check `on_startup()` function completes successfully in `main.py`
+- Review `make bot-logs` for errors
+- Verify required env variables are set
+
+**Task Reports webhook not working:**
+- Check webhook server is running: `make bot-status`
+- Verify n8n workflow is active: https://n8n.hhivp.com/workflows
+- Check logs: `make bot-logs | grep webhook`
+
+### Bot Management
+
+The bot uses `bot_manager.sh` script (called by Makefile):
+- Manages single process via PID file
+- Handles graceful restarts
+- Logs to `logs/bot_output.log`
+
+Production uses systemd service or Docker containers.
+
+---
+
+## 🧪 Testing Strategy
+
+### Critical Tests (Run Before Committing)
+
+**Module isolation is CRITICAL** - always test:
+```bash
+python3 test_modules_isolation.py  # Ensures filters work correctly
+python3 test_email_fix.py          # Email handler isolation
+```
+
+### Integration Tests
+```bash
+python3 test_basic.py                      # Basic functionality
+python3 test_daily_tasks_comprehensive.py  # Daily Tasks module
+python3 test_plane_daily_tasks.py          # Plane.so integration
+python3 test_task_reports_flow.py          # Task Reports end-to-end (NEW)
+```
+
+### Task Reports Test Script
+
+Create realistic test task in Plane with description, comments & assignees:
+
+```bash
+# Set Plane API token (from SECRETS.md or .env)
+export PLANE_API_TOKEN="plane_api_xxxx"
+
+# Run the test script
+./venv/bin/python /tmp/create_test_task.py
+```
+
+**What it creates:**
+- ✅ Test task with full description (HTML format)
+- ✅ 2 realistic comments in Russian
+- ✅ Auto-assigned to your user (zarudesu@gmail.com)
+- ✅ High priority
+
+**Next steps after running:**
+1. Mark task as "Done" in Plane UI
+2. Check bot notification: `make bot-logs | grep "task-completed"`
+3. Fill report as admin in Telegram
+4. Verify all integrations (client + work_journal + Google Sheets + group)
+
+**📖 Full Testing Guide:** [`docs/guides/task-reports-guide.md#-testing`](docs/guides/task-reports-guide.md#-testing)
+
+### Manual Testing Checklist
+
+- [ ] Email processing (Daily Tasks)
+- [ ] Work Journal → Google Sheets
+- [ ] Task Reports → Client + Google Sheets + Group
+- [ ] Router isolation (no message conflicts)
+- [ ] Admin-only features (verify permissions)
+
+---
+
+## 📚 References
+
+### Documentation
+- [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md) - Task Reports complete guide
+- [`docs/TASK_REPORTS_FLOW.md`](docs/TASK_REPORTS_FLOW.md) - Flow diagrams
+- [`TASK_REPORTS_FIXES.md`](TASK_REPORTS_FIXES.md) - Bug fixes history
+- [`docs/README.md`](docs/README.md) - Documentation index
+
+### Architecture
+- `app/main.py:244-264` - Router loading order (CRITICAL)
+- `app/main.py:165-181` - Middleware stack
+- `app/config.py` - Configuration & settings
+
+### Key Files
+- `app/webhooks/server.py` - Webhook endpoints (Task Reports, n8n)
+- `app/services/task_reports_service.py:254-459` - Task Reports autofill logic
+- `app/modules/task_reports/handlers/approval.py` - approve_send with full integration
+- `bot_manager.sh` - Bot process management
+
+---
+
+## 🚧 Enterprise Architecture (v3.0) - BETA
+
+**Status:** In development, not production ready
 
 ### Core Systems
 
 **Event Bus** (`app/core/events/`):
 - Reactive event-driven architecture
 - Priority-based event handling
-- Middleware support for event processing
 - 7+ event types: MessageReceived, TaskCreated, AIRequest, etc.
 
 **Plugin System** (`app/core/plugins/`):
 - Dynamic plugin loading/unloading
 - Dependency management between plugins
-- Base types: MessagePlugin, CallbackPlugin, AIPlugin
 
 **AI Abstractions** (`app/core/ai/`):
 - Universal LLM provider interface
 - OpenAI and Anthropic Claude support
 - Conversation history and cost tracking
-- Configurable temperature, max_tokens, etc.
 
 ### Enterprise Modules
 
@@ -686,23 +772,16 @@ make dev-restart
 - `/ai <question>` - Chat with AI
 - `/ai_summary` - Summarize chat context
 - `/ai_auto_task` - Auto-detect tasks from messages
-- `/ai_help` - AI features help
 
 **Chat Monitor** (`app/modules/chat_monitor/`):
 - Reads all group messages
 - Maintains context (last 50 messages per chat)
 - `/monitor_start`, `/monitor_stop`, `/monitor_status`
 
-### AI Configuration
+---
 
-Add to `.env`:
-```env
-OPENAI_API_KEY=sk-your-openai-key
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
-AI_MODEL=gpt-4-turbo
-AI_TEMPERATURE=0.7
-AI_MAX_TOKENS=2000
-```
+**Last Updated:** 2025-10-09
+**Bot Version:** 2.5 (Task Reports Production Ready)
+**Questions?** Check logs: `make bot-logs`
 
-Without API keys, AI features are disabled (bot still works normally)
-```
+📚 **See also:** [README_DOCKER.md](README_DOCKER.md) - Detailed Docker development guide

@@ -1,0 +1,624 @@
+"""
+Task Reports Metadata Handlers - Collecting work metadata (duration, type, company, workers)
+"""
+
+import json
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
+
+from .states import TaskReportStates
+from ...database.database import get_async_session
+from ...services.task_reports_service import task_reports_service
+from ...utils.logger import bot_logger
+from ...integrations.plane import plane_api
+
+
+router = Router(name="task_reports_metadata")
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: AGREE TO TEXT (when autofilled)
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("agree_text:"))
+async def callback_agree_text(callback: CallbackQuery, state: FSMContext):
+    """
+    Admin agrees with autofilled text, move to metadata collection
+    """
+    try:
+        task_report_id = int(callback.data.split(":")[1])
+        bot_logger.info(f"✅ Admin {callback.from_user.id} agreed with text for report #{task_report_id}")
+
+        # Move to duration collection
+        await state.set_state(TaskReportStates.filling_duration)
+        await state.update_data(task_report_id=task_report_id)
+
+        await callback.message.edit_text(
+            f"✅ **Текст отчёта согласован!**\n\n"
+            f"Теперь заполним метаданные работы.\n\n"
+            f"⏱️ **Укажите длительность работы**\n"
+            f"Примеры: `2h`, `4h`, `1.5h`, `30m`",
+            parse_mode="Markdown"
+        )
+
+        await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in agree_text callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TEXT HANDLER: DURATION
+# ═══════════════════════════════════════════════════════════
+
+@router.message(StateFilter(TaskReportStates.filling_duration), F.text)
+async def handle_duration(message: Message, state: FSMContext):
+    """
+    Admin sends work duration (e.g., "2h", "4h")
+    """
+    try:
+        duration = message.text.strip()
+
+        # Simple validation
+        if not any(char in duration.lower() for char in ['h', 'm']):
+            await message.reply(
+                "❌ Неверный формат длительности.\n\n"
+                "Примеры: `2h`, `4h`, `1.5h`, `30m`",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Save to state
+        await state.update_data(work_duration=duration)
+        bot_logger.info(f"✅ Duration saved: {duration}")
+
+        # Move to work type selection
+        await state.set_state(TaskReportStates.filling_work_type)
+
+        await message.reply(
+            f"✅ Длительность: **{duration}**\n\n"
+            f"🚗 **Выберите тип работы:**",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🚗 Выезд", callback_data="work_type:travel")],
+                [InlineKeyboardButton(text="💻 Удалённо", callback_data="work_type:remote")]
+            ])
+        )
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error handling duration: {e}")
+        await message.reply("❌ Произошла ошибка")
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: WORK TYPE
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("work_type:"))
+async def callback_work_type(callback: CallbackQuery, state: FSMContext):
+    """
+    Admin selects work type (travel/remote)
+    """
+    try:
+        work_type = callback.data.split(":")[1]
+        is_travel = (work_type == "travel")
+
+        # Save to state
+        await state.update_data(is_travel=is_travel)
+        bot_logger.info(f"✅ Work type saved: {'Выезд' if is_travel else 'Удалённо'}")
+
+        # Get task report to fetch company from Plane
+        state_data = await state.get_data()
+        task_report_id = state_data.get("task_report_id")
+
+        if not task_report_id:
+            await callback.answer("❌ Ошибка: не найден ID отчёта", show_alert=True)
+            return
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await callback.answer("❌ Отчёт не найден", show_alert=True)
+                return
+
+            # Fetch project name from Plane
+            try:
+                project_data = await plane_api.get_project(task_report.plane_project_id)
+                suggested_company = project_data.get("name", "")
+                bot_logger.info(f"✅ Fetched project name from Plane: {suggested_company}")
+            except Exception as e:
+                bot_logger.warning(f"⚠️ Failed to fetch project from Plane: {e}")
+                suggested_company = ""
+
+            # Move to company input
+            await state.set_state(TaskReportStates.filling_company)
+
+            if suggested_company:
+                await callback.message.edit_text(
+                    f"✅ Тип работы: **{'🚗 Выезд' if is_travel else '💻 Удалённо'}**\n\n"
+                    f"🏢 **Укажите компанию**\n"
+                    f"Предложение из Plane: `{suggested_company}`\n\n"
+                    f"Отправьте название компании или используйте кнопку:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=f"✅ {suggested_company}",
+                            callback_data=f"use_company:{suggested_company}"
+                        )]
+                    ])
+                )
+            else:
+                await callback.message.edit_text(
+                    f"✅ Тип работы: **{'🚗 Выезд' if is_travel else '💻 Удалённо'}**\n\n"
+                    f"🏢 **Укажите компанию**\n"
+                    f"Отправьте название компании:",
+                    parse_mode="Markdown"
+                )
+
+            await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in work_type callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: USE SUGGESTED COMPANY
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("use_company:"))
+async def callback_use_company(callback: CallbackQuery, state: FSMContext):
+    """
+    Admin uses suggested company name from Plane project
+    """
+    try:
+        company_name = callback.data.replace("use_company:", "")
+
+        # Save and move to workers
+        await state.update_data(company=company_name)
+        bot_logger.info(f"✅ Company saved: {company_name}")
+
+        # Get task report to fetch assignees from Plane
+        state_data = await state.get_data()
+        task_report_id = state_data.get("task_report_id")
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await callback.answer("❌ Отчёт не найден", show_alert=True)
+                return
+
+            # Fetch assignees from Plane task
+            try:
+                issue_data = await plane_api.get_issue(
+                    task_report.plane_project_id,
+                    task_report.plane_issue_id
+                )
+                assignees = issue_data.get("assignees", [])
+                suggested_workers = []
+
+                # Get display names from assignee IDs
+                for assignee_id in assignees:
+                    try:
+                        member = await plane_api.get_workspace_member(assignee_id)
+                        display_name = member.get("member", {}).get("display_name")
+                        if display_name:
+                            suggested_workers.append(display_name)
+                    except Exception as e:
+                        bot_logger.warning(f"⚠️ Failed to fetch assignee {assignee_id}: {e}")
+
+                workers_text = ", ".join(suggested_workers) if suggested_workers else ""
+                bot_logger.info(f"✅ Fetched assignees from Plane: {workers_text}")
+
+            except Exception as e:
+                bot_logger.warning(f"⚠️ Failed to fetch assignees from Plane: {e}")
+                workers_text = ""
+
+            # Move to workers input
+            await state.set_state(TaskReportStates.filling_workers)
+
+            if workers_text:
+                await callback.message.edit_text(
+                    f"✅ Компания: **{company_name}**\n\n"
+                    f"👥 **Укажите исполнителей**\n"
+                    f"Предложение из Plane: `{workers_text}`\n\n"
+                    f"Отправьте имена через запятую или используйте кнопку:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=f"✅ {workers_text}",
+                            callback_data=f"use_workers:{workers_text}"
+                        )]
+                    ])
+                )
+            else:
+                await callback.message.edit_text(
+                    f"✅ Компания: **{company_name}**\n\n"
+                    f"👥 **Укажите исполнителей**\n"
+                    f"Отправьте имена через запятую (например: Иван, Пётр):",
+                    parse_mode="Markdown"
+                )
+
+            await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in use_company callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TEXT HANDLER: COMPANY
+# ═══════════════════════════════════════════════════════════
+
+@router.message(StateFilter(TaskReportStates.filling_company), F.text)
+async def handle_company(message: Message, state: FSMContext):
+    """
+    Admin manually enters company name
+    """
+    try:
+        company = message.text.strip()
+
+        # Save and move to workers
+        await state.update_data(company=company)
+        bot_logger.info(f"✅ Company saved: {company}")
+
+        # Fetch assignees from Plane (same logic as use_company callback)
+        state_data = await state.get_data()
+        task_report_id = state_data.get("task_report_id")
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await message.reply("❌ Отчёт не найден")
+                return
+
+            # Fetch assignees
+            try:
+                issue_data = await plane_api.get_issue(
+                    task_report.plane_project_id,
+                    task_report.plane_issue_id
+                )
+                assignees = issue_data.get("assignees", [])
+                suggested_workers = []
+
+                for assignee_id in assignees:
+                    try:
+                        member = await plane_api.get_workspace_member(assignee_id)
+                        display_name = member.get("member", {}).get("display_name")
+                        if display_name:
+                            suggested_workers.append(display_name)
+                    except:
+                        pass
+
+                workers_text = ", ".join(suggested_workers) if suggested_workers else ""
+            except:
+                workers_text = ""
+
+            # Move to workers
+            await state.set_state(TaskReportStates.filling_workers)
+
+            if workers_text:
+                await message.reply(
+                    f"✅ Компания: **{company}**\n\n"
+                    f"👥 **Укажите исполнителей**\n"
+                    f"Предложение из Plane: `{workers_text}`\n\n"
+                    f"Отправьте имена через запятую или используйте кнопку:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=f"✅ {workers_text}",
+                            callback_data=f"use_workers:{workers_text}"
+                        )]
+                    ])
+                )
+            else:
+                await message.reply(
+                    f"✅ Компания: **{company}**\n\n"
+                    f"👥 **Укажите исполнителей**\n"
+                    f"Отправьте имена через запятую:",
+                    parse_mode="Markdown"
+                )
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error handling company: {e}")
+        await message.reply("❌ Произошла ошибка")
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: USE SUGGESTED WORKERS
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("use_workers:"))
+async def callback_use_workers(callback: CallbackQuery, state: FSMContext):
+    """
+    Admin uses suggested workers from Plane assignees
+    """
+    try:
+        workers_text = callback.data.replace("use_workers:", "")
+        workers_list = [w.strip() for w in workers_text.split(",")]
+
+        # Save workers as JSON array
+        await state.update_data(workers=json.dumps(workers_list))
+        bot_logger.info(f"✅ Workers saved: {workers_list}")
+
+        # All metadata collected - save to DB and show preview
+        await save_metadata_and_show_preview(callback, state, is_callback=True)
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in use_workers callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TEXT HANDLER: WORKERS
+# ═══════════════════════════════════════════════════════════
+
+@router.message(StateFilter(TaskReportStates.filling_workers), F.text)
+async def handle_workers(message: Message, state: FSMContext):
+    """
+    Admin manually enters workers list
+    """
+    try:
+        workers_text = message.text.strip()
+        workers_list = [w.strip() for w in workers_text.split(",")]
+
+        # Save workers as JSON array
+        await state.update_data(workers=json.dumps(workers_list))
+        bot_logger.info(f"✅ Workers saved: {workers_list}")
+
+        # All metadata collected - save to DB and show preview
+        await save_metadata_and_show_preview(message, state, is_callback=False)
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error handling workers: {e}")
+        await message.reply("❌ Произошла ошибка")
+
+
+# ═══════════════════════════════════════════════════════════
+# HELPER: SAVE METADATA AND SHOW PREVIEW
+# ═══════════════════════════════════════════════════════════
+
+async def save_metadata_and_show_preview(event, state: FSMContext, is_callback: bool):
+    """
+    Save all metadata to DB and show final preview
+    """
+    try:
+        state_data = await state.get_data()
+        task_report_id = state_data.get("task_report_id")
+        work_duration = state_data.get("work_duration")
+        is_travel = state_data.get("is_travel")
+        company = state_data.get("company")
+        workers = state_data.get("workers")
+
+        if not task_report_id:
+            if is_callback:
+                await event.answer("❌ Ошибка: не найден ID отчёта", show_alert=True)
+            else:
+                await event.reply("❌ Ошибка: не найден ID отчёта")
+            return
+
+        # Save metadata to DB
+        async for session in get_async_session():
+            # Update task report with metadata
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                if is_callback:
+                    await event.answer("❌ Отчёт не найден", show_alert=True)
+                else:
+                    await event.reply("❌ Отчёт не найден")
+                return
+
+            # Update metadata fields
+            task_report.work_duration = work_duration
+            task_report.is_travel = is_travel
+            task_report.company = company
+            task_report.workers = workers
+            await session.commit()
+            await session.refresh(task_report)
+
+            bot_logger.info(
+                f"✅ Metadata saved for report #{task_report_id}: "
+                f"duration={work_duration}, travel={is_travel}, company={company}, workers={workers}"
+            )
+
+            # Move to review state
+            await state.set_state(TaskReportStates.reviewing_report)
+
+            # Parse workers list for display
+            try:
+                workers_list = json.loads(workers)
+                workers_display = ", ".join(workers_list)
+            except:
+                workers_display = workers
+
+            # Show final preview
+            preview_text = f"""
+✅ **Отчёт готов к отправке!**
+
+📋 **Задача:** #{task_report.plane_sequence_id}
+
+**МЕТАДАННЫЕ РАБОТЫ:**
+⏱️ Длительность: **{work_duration}**
+🚗 Тип работы: **{'Выезд' if is_travel else 'Удалённо'}**
+🏢 Компания: **{company}**
+👥 Исполнители: **{workers_display}**
+
+**ОТЧЁТ ДЛЯ КЛИЕНТА:**
+{task_report.report_text[:500]}{"..." if len(task_report.report_text or "") > 500 else ""}
+
+_Клиенту будет отправлен ТОЛЬКО текст отчёта (без метаданных)_
+"""
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✅ Отправить клиенту",
+                    callback_data=f"send_report:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="✏️ Редактировать",
+                    callback_data=f"edit_report:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_report:{task_report_id}"
+                )]
+            ])
+
+            if is_callback:
+                await event.message.edit_text(preview_text, parse_mode="Markdown", reply_markup=keyboard)
+                await event.answer()
+            else:
+                await event.reply(preview_text, parse_mode="Markdown", reply_markup=keyboard)
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error saving metadata and showing preview: {e}")
+        if is_callback:
+            await event.answer("❌ Произошла ошибка", show_alert=True)
+        else:
+            await event.reply("❌ Произошла ошибка")
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: EDIT INDIVIDUAL FIELD
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("edit_field:"))
+async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
+    """
+    Handle editing individual fields from edit menu
+    Format: edit_field:{field_name}:{task_report_id}
+    """
+    try:
+        parts = callback.data.split(":")
+        field_name = parts[1]
+        task_report_id = int(parts[2])
+
+        bot_logger.info(f"📝 Admin {callback.from_user.id} editing field '{field_name}' for report #{task_report_id}")
+
+        await state.update_data(task_report_id=task_report_id)
+
+        if field_name == "text":
+            # Edit report text
+            await state.set_state(TaskReportStates.filling_report)
+            await callback.message.edit_text(
+                "📝 **Редактирование текста отчёта**\n\n"
+                "Отправьте новый текст отчёта:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data=f"edit_report:{task_report_id}"
+                    )]
+                ])
+            )
+
+        elif field_name == "duration":
+            # Edit duration
+            await state.set_state(TaskReportStates.filling_duration)
+            await callback.message.edit_text(
+                "⏱️ **Редактирование длительности работы**\n\n"
+                "Укажите длительность работы\n"
+                "Примеры: `2h`, `4h`, `1.5h`, `30m`",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data=f"edit_report:{task_report_id}"
+                    )]
+                ])
+            )
+
+        elif field_name == "work_type":
+            # Edit work type
+            await state.set_state(TaskReportStates.filling_work_type)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="🚗 Выезд",
+                    callback_data=f"set_travel:yes:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="💻 Удалённо",
+                    callback_data=f"set_travel:no:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="◀️ Назад",
+                    callback_data=f"edit_report:{task_report_id}"
+                )]
+            ])
+            await callback.message.edit_text(
+                "🚗 **Редактирование типа работы**\n\n"
+                "Выберите тип работы:",
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+
+        elif field_name == "company":
+            # Edit company
+            await state.set_state(TaskReportStates.filling_company)
+            await callback.message.edit_text(
+                "🏢 **Редактирование компании**\n\n"
+                "Укажите название компании:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data=f"edit_report:{task_report_id}"
+                    )]
+                ])
+            )
+
+        elif field_name == "workers":
+            # Edit workers
+            await state.set_state(TaskReportStates.filling_workers)
+            await callback.message.edit_text(
+                "👥 **Редактирование исполнителей**\n\n"
+                "Укажите исполнителей через запятую\n"
+                "Пример: `Иван Иванов, Пётр Петров`",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data=f"edit_report:{task_report_id}"
+                    )]
+                ])
+            )
+
+        await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in edit_field callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# Handler for set_travel callback from edit menu
+@router.callback_query(F.data.startswith("set_travel:"))
+async def callback_set_travel(callback: CallbackQuery, state: FSMContext):
+    """Set travel type from edit menu"""
+    try:
+        parts = callback.data.split(":")
+        is_travel = parts[1] == "yes"
+        task_report_id = int(parts[2])
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+            if task_report:
+                task_report.is_travel = is_travel
+                await session.commit()
+
+                # Return to edit menu
+                await callback.answer(f"✅ Тип работы: {'Выезд' if is_travel else 'Удалённо'}")
+                # Trigger edit_report to refresh menu
+                callback.data = f"edit_report:{task_report_id}"
+                from .handlers import callback_edit_report
+                await callback_edit_report(callback, state)
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in set_travel callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)

@@ -10,18 +10,11 @@ from .filters import IsAdminFilter
 from ...database.database import get_async_session
 from ...database.models import UserSession
 from ...utils.logger import bot_logger
+from ...utils.markdown import escape_markdown_v2
 from ...config import settings
 
 
 router = Router()
-
-
-def escape_markdown_v2(text: str) -> str:
-    """Правильное экранирование для MarkdownV2"""
-    chars_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '@']
-    for char in chars_to_escape:
-        text = text.replace(char, f'\\{char}')
-    return text
 
 
 def is_admin(user_id: int) -> bool:
@@ -154,60 +147,24 @@ async def callback_settings_done(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "refresh_tasks")
-async def callback_refresh_tasks(callback: CallbackQuery):
-    """Принудительно обновить задачи из Plane (запустить фоновую синхронизацию)"""
+@router.callback_query(F.data == "daily_tasks")
+async def callback_daily_tasks_redirect(callback: CallbackQuery):
+    """Redirect для кнопки daily_tasks - просто вызываем cmd_daily_tasks напрямую"""
     admin_id = callback.from_user.id
 
     if not is_admin(admin_id):
         await callback.answer("❌ У вас нет прав для этого действия", show_alert=True)
         return
 
-    try:
-        from ...services.daily_tasks_service import daily_tasks_service
-        from ...services.user_tasks_cache_service import user_tasks_cache_service
-        from ...integrations.plane import plane_api
+    # Перенаправляем на обработчик daily_tasks из handlers.py
+    from .handlers import cmd_daily_tasks
+    from aiogram.types import Message
 
-        if not daily_tasks_service or not plane_api.configured:
-            await callback.answer("❌ Plane API не настроен", show_alert=True)
-            return
+    # Создаем фейковое сообщение для вызова обработчика
+    fake_message = callback.message
+    fake_message.from_user = callback.from_user
 
-        # Обновляем настройки из БД
-        await daily_tasks_service._load_admin_settings_from_db()
-        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
-
-        admin_email = admin_settings.get('plane_email')
-        if not admin_email:
-            await callback.answer("❌ Email не настроен", show_alert=True)
-            return
-
-        # Запускаем фоновую синхронизацию
-        sync_started = await user_tasks_cache_service.start_user_sync(
-            user_email=admin_email,
-            telegram_user_id=admin_id,
-            notify_user=True
-        )
-
-        if sync_started:
-            await callback.answer("🔄 Обновление задач запущено!", show_alert=True)
-            # Перенаправляем на главную страницу задач
-            await callback.message.edit_text(
-                "⏳ *Обновление задач\\.\\.\\.*\n\n"
-                "Ваши задачи обновляются в фоновом режиме\\.\n"
-                "Это займет около 5 минут\\.\n\n"
-                "💡 _Мы уведомим вас, когда обновление завершится\\._",
-                parse_mode="MarkdownV2",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
-                ])
-            )
-        else:
-            await callback.answer("⏳ Обновление уже выполняется", show_alert=True)
-
-    except Exception as e:
-        bot_logger.error(f"Error in refresh_tasks callback: {e}")
-        await callback.answer("❌ Ошибка обновления", show_alert=True)
-    
+    await cmd_daily_tasks(fake_message)
     await callback.answer()
 
 

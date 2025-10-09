@@ -48,18 +48,18 @@ class WorkerMentionService:
         return mentions
     
     def format_work_assignment_message(
-        self, 
-        entry: WorkJournalEntry, 
+        self,
+        entry: WorkJournalEntry,
         creator_name: str,
         mentions: List[Dict]
     ) -> str:
         """Форматировать сообщение о назначении работы с упоминаниями"""
-        
+
         # Формируем список упоминаний
         mention_texts = []
         for mention in mentions:
             mention_texts.append(mention["mention_text"])
-        
+
         # Если нет упоминаний, показываем просто имена
         if not mention_texts:
             try:
@@ -67,26 +67,35 @@ class WorkerMentionService:
                 mention_texts = worker_names
             except (json.JSONDecodeError, TypeError):
                 mention_texts = ["Исполнитель не указан"]
-        
+
         workers_text = ", ".join(mention_texts)
-        
+
+        # Escape HTML special characters
+        def escape_html(text: str) -> str:
+            return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        company_escaped = escape_html(entry.company)
+        description_escaped = escape_html(entry.work_description)
+
         # Импортируем настройки для ссылки на Google Sheets
         from ..config import settings
-        
+
         message = (
-            f"📋 **Новая запись в журнале работ**\n\n"
-            f"👥 **Исполнители:** {workers_text}\n"
-            f"🏢 **Компания:** {entry.company}\n"
-            f"📅 **Дата:** {entry.work_date.strftime('%d.%m.%Y')}\n"
-            f"⏱ **Время:** {entry.work_duration}\n"
-            f"🚗 **Тип:** {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
-            f"📝 **Описание:**\n{entry.work_description}\n\n"
-            f"👤 **Создал:** {creator_name}\n\n"
+            f"📋 <b>Новая запись в журнале работ</b>\n\n"
+            f"👥 <b>Исполнители:</b> {workers_text}\n"
+            f"🏢 <b>Компания:</b> {company_escaped}\n"
+            f"📅 <b>Дата:</b> {entry.work_date.strftime('%d.%m.%Y')}\n"
+            f"⏱ <b>Время:</b> {entry.work_duration}\n"
+            f"🚗 <b>Тип:</b> {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
+            f"📝 <b>Описание:</b>\n{description_escaped}\n\n"
         )
-        
-        # Добавляем ссылку на Google Sheets если настроена
+
+        # Добавляем создателя и ссылку на Google Sheets (HTML link)
+        message += f"👤 <b>Создал:</b> {creator_name}\n"
+
         if settings.google_sheets_url:
-            message += f"📊 [Google Sheets]({settings.google_sheets_url})\n\n"
+            # HTML clickable link: <a href="URL">text</a>
+            message += f'<a href="{settings.google_sheets_url}">📊 Google Sheets</a>\n'
 
         message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -121,7 +130,7 @@ class WorkerMentionService:
                 await self.bot.send_message(
                     chat_id=chat_id,
                     text=message,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 bot_logger.info(f"Work assignment notification sent to chat {chat_id}")
             except Exception as e:
@@ -139,21 +148,28 @@ class WorkerMentionService:
                         )
                         
                         if user_prefs and user_prefs.enable_work_assignment_notifications:
+                            # Escape HTML special characters
+                            def escape_html(text: str) -> str:
+                                return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                            company_escaped = escape_html(entry.company)
+                            description_escaped = escape_html(entry.work_description)
+
                             personal_message = (
-                                f"🔔 **Вам назначена работа**\n\n"
-                                f"🏢 **Компания:** {entry.company}\n"
-                                f"📅 **Дата:** {entry.work_date.strftime('%d.%m.%Y')}\n"
-                                f"⏱ **Время:** {entry.work_duration}\n"
-                                f"🚗 **Тип:** {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
-                                f"📝 **Описание:**\n{entry.work_description}\n\n"
-                                f"👤 **Назначил:** {creator_name}\n\n"
-                                f"_Для отключения уведомлений используйте /settings_"
+                                f"🔔 <b>Вам назначена работа</b>\n\n"
+                                f"🏢 <b>Компания:</b> {company_escaped}\n"
+                                f"📅 <b>Дата:</b> {entry.work_date.strftime('%d.%m.%Y')}\n"
+                                f"⏱ <b>Время:</b> {entry.work_duration}\n"
+                                f"🚗 <b>Тип:</b> {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
+                                f"📝 <b>Описание:</b>\n{description_escaped}\n\n"
+                                f"👤 <b>Назначил:</b> {creator_name}\n\n"
+                                f"<i>Для отключения уведомлений используйте /settings</i>"
                             )
-                            
+
                             await self.bot.send_message(
                                 chat_id=mention["telegram_user_id"],
                                 text=personal_message,
-                                parse_mode="Markdown"
+                                parse_mode="HTML"
                             )
                             
                             bot_logger.info(f"Personal notification sent to {mention['name']} ({mention['telegram_user_id']})")
@@ -249,15 +265,22 @@ class WorkerMentionService:
                     # Это упрощенная версия - в реальности нужна более сложная логика
                     # для поиска пользователей по username
                     
+                    # Escape HTML special characters
+                    def escape_html(text: str) -> str:
+                        return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                    company_escaped = escape_html(entry.company)
+                    description_escaped = escape_html(entry.work_description)
+
                     # Формируем персональное сообщение
                     message = (
-                        f"🔔 **Вам назначена работа**\n\n"
-                        f"🏢 **Компания:** {entry.company}\n"
-                        f"📅 **Дата:** {entry.work_date.strftime('%d.%m.%Y')}\n"
-                        f"⏱ **Время:** {entry.work_duration}\n"
-                        f"🚗 **Тип:** {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
-                        f"📝 **Описание:**\n{entry.work_description}\n\n"
-                        f"👤 **Назначил:** {creator_name}"
+                        f"🔔 <b>Вам назначена работа</b>\n\n"
+                        f"🏢 <b>Компания:</b> {company_escaped}\n"
+                        f"📅 <b>Дата:</b> {entry.work_date.strftime('%d.%m.%Y')}\n"
+                        f"⏱ <b>Время:</b> {entry.work_duration}\n"
+                        f"🚗 <b>Тип:</b> {'Выезд' if entry.is_travel else 'Удаленно'}\n\n"
+                        f"📝 <b>Описание:</b>\n{description_escaped}\n\n"
+                        f"👤 <b>Назначил:</b> {creator_name}"
                     )
                     
                     # Здесь должна быть логика отправки в личный чат

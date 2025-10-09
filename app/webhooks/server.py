@@ -177,16 +177,62 @@ class WebhookServer:
                 )
 
                 if not task_report:
-                    bot_logger.error("Failed to create TaskReport from webhook")
+                    # None means duplicate (already completed) - return success to prevent retries
+                    bot_logger.info(
+                        f"⏭️ Skipping notification for duplicate/completed task "
+                        f"(plane_issue={data.get('plane_issue_id')})"
+                    )
                     return web.json_response(
-                        {'error': 'Failed to create task report'},
-                        status=500
+                        {'status': 'ignored', 'reason': 'Task already completed'},
+                        status=200
                     )
 
                 bot_logger.info(
                     f"✅ Created TaskReport #{task_report.id} for "
                     f"Plane issue {task_report.plane_sequence_id}"
                 )
+
+                # BUG FIX #4: Refresh task_report from database to get updated description
+                # (create_task_report_from_webhook calls fetch_and_generate_report_from_plane
+                # which updates task_description from Plane API and commits)
+                await session.refresh(task_report)
+                bot_logger.info(f"🔄 Refreshed task_report from DB, description length: {len(task_report.task_description) if task_report.task_description else 0}")
+
+                # 📥 FETCH PLANE DATA (comments, assignees, priority, project name)
+                from ..integrations.plane import plane_api
+
+                plane_details = None
+                plane_comments = []
+                plane_project_name = None
+
+                if plane_api.configured and task_report.plane_project_id and task_report.plane_issue_id:
+                    try:
+                        bot_logger.info(f"📥 Fetching Plane details for notification...")
+
+                        # Fetch issue details (assignees, priority, state, labels)
+                        plane_details = await plane_api.get_issue_details(
+                            project_id=task_report.plane_project_id,
+                            issue_id=task_report.plane_issue_id
+                        )
+
+                        # Fetch comments
+                        plane_comments = await plane_api.get_issue_comments(
+                            project_id=task_report.plane_project_id,
+                            issue_id=task_report.plane_issue_id
+                        )
+
+                        # Get project name from cached projects list
+                        projects = await plane_api.get_all_projects()
+                        project_match = next((p for p in projects if p['id'] == task_report.plane_project_id), None)
+                        if project_match:
+                            plane_project_name = project_match['name']
+
+                        bot_logger.info(
+                            f"✅ Fetched Plane data: {len(plane_comments)} comments, "
+                            f"project={plane_project_name}, priority={plane_details.get('priority') if plane_details else None}"
+                        )
+                    except Exception as e:
+                        bot_logger.warning(f"⚠️ Failed to fetch Plane data for notification: {e}")
 
                 # Отправляем уведомление админу (приоритет - кто закрыл)
                 admin_to_notify = task_report.closed_by_telegram_id
@@ -196,8 +242,13 @@ class WebhookServer:
 
                 # Формируем сообщение
                 autofill_notice = ""
-                if task_report.auto_filled_from_journal:
+                # Проверяем что report_text не пустой (минимум 100 символов)
+                has_meaningful_content = task_report.report_text and len(task_report.report_text.strip()) > 100
+
+                if task_report.auto_filled_from_journal and has_meaningful_content:
                     autofill_notice = "\n\n✅ _Отчёт автоматически заполнен из work journal_"
+                elif task_report.report_text and has_meaningful_content:
+                    autofill_notice = "\n\n✅ _Отчёт сгенерирован из комментариев Plane_"
 
                 # Экранируем спецсимволы MarkdownV2
                 def escape_md(text: str) -> str:
@@ -212,43 +263,152 @@ class WebhookServer:
                 task_title = escape_md(task_report.task_title or 'Не указано')
                 closed_by = escape_md(task_report.closed_by_plane_name or 'Неизвестно')
 
-                # Get project name from webhook data if available
-                project_name = escape_md(data.get('project_name', ''))
-                project_line = f"**Проект:** {project_name}\n" if project_name else ""
+                # Project name (from Plane API or webhook data)
+                project_name = plane_project_name or data.get('project_name', '')
+                project_line = f"**Проект:** {escape_md(project_name)}\n" if project_name else ""
+
+                # Priority from Plane (if available)
+                priority_line = ""
+                if plane_details and plane_details.get('priority'):
+                    priority_map = {
+                        'urgent': '🔴 Срочно',
+                        'high': '🟠 Высокий',
+                        'medium': '🟡 Средний',
+                        'low': '🟢 Низкий',
+                        'none': '⚪ Не указан'
+                    }
+                    priority_text = priority_map.get(plane_details['priority'], plane_details['priority'])
+                    priority_line = f"**Приоритет:** {escape_md(priority_text)}\n"
+
+                # Assignees from Plane (if available)
+                assignees_line = ""
+                if plane_details and plane_details.get('assignee_details'):
+                    assignees = plane_details['assignee_details']
+                    if isinstance(assignees, list) and assignees:
+                        assignee_names = [
+                            assignee.get('display_name') or assignee.get('first_name', 'Unknown')
+                            for assignee in assignees
+                        ]
+                        assignees_text = ", ".join(assignee_names)
+                        assignees_line = f"**Исполнители:** {escape_md(assignees_text)}\n"
+
+                # Task description preview
+                description_preview = ""
+                if task_report.task_description and len(task_report.task_description.strip()) > 10:
+                    desc_text = task_report.task_description.strip()
+                    # Truncate long descriptions
+                    if len(desc_text) > 150:
+                        desc_text = desc_text[:147] + "..."
+                    description_preview = f"\n**📄 Описание:**\n_{escape_md(desc_text)}_\n"
+
+                # Comments preview (first 3 comments)
+                comments_preview = ""
+                if plane_comments:
+                    comments_preview = f"\n**💬 Комментарии \\({len(plane_comments)}\\):**\n"
+                    for idx, comment in enumerate(plane_comments[:3], 1):
+                        # Try both 'comment_html' and 'comment' fields
+                        comment_html = comment.get('comment_html', '').strip()
+                        comment_text = comment.get('comment', '').strip()
+
+                        # Prefer comment_html, fallback to comment
+                        text_to_show = comment_html or comment_text
+
+                        if text_to_show:
+                            # Strip HTML tags from comment_html
+                            import re
+                            text_to_show = re.sub(r'<[^>]+>', '', text_to_show).strip()
+
+                            # Truncate long comments
+                            if len(text_to_show) > 100:
+                                text_to_show = text_to_show[:97] + "..."
+
+                            actor_detail = comment.get('actor_detail', {})
+                            actor_name = (
+                                actor_detail.get('display_name') or
+                                actor_detail.get('first_name') or
+                                'Unknown'
+                            )
+                            comments_preview += f"{idx}\\. _{escape_md(actor_name)}_: {escape_md(text_to_show)}\n"
+
+                    if len(plane_comments) > 3:
+                        comments_preview += f"_\\.\\.\\. и ещё {len(plane_comments) - 3} комментариев_\n"
 
                 # Build Plane task URL
                 plane_url = f"https://plane.hhivp.com/hhivp/projects/{task_report.plane_project_id}/issues/{task_report.plane_issue_id}"
                 plane_link = f"[Открыть в Plane]({plane_url})"
+
+                # Проверяем наличие привязки к клиенту
+                has_client = bool(task_report.client_chat_id)
+
+                # Формируем информацию о клиенте
+                if has_client and task_report.support_request:
+                    # Получаем детали support_request для показа клиента
+                    client_info = f"✅ Клиент: chat\\_id={task_report.client_chat_id}"
+                else:
+                    client_info = "⚠️ Клиент: не привязан к задаче"
 
                 notification_text = (
                     f"📋 **Требуется отчёт о выполненной задаче\\!**\n\n"
                     f"**Задача:** \\#{task_report.plane_sequence_id}\n"
                     f"**Название:** {task_title}\n"
                     f"{project_line}"
+                    f"{priority_line}"
+                    f"{assignees_line}"
                     f"**Закрыл:** {closed_by}\n"
-                    f"{plane_link}{autofill_notice}"
+                    f"{client_info}\n"
+                    f"{description_preview}"
+                    f"{comments_preview}"
+                    f"\n{plane_link}{autofill_notice}"
                 )
 
-                # Кнопки
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                # Кнопки - ВСЕГДА включают все опции
+                keyboard_buttons = [
                     [InlineKeyboardButton(
-                        text="📝 Заполнить отчёт",
+                        text="📝 Заполнить/Редактировать отчёт",
                         callback_data=f"fill_report:{task_report.id}"
-                    )],
-                    # [InlineKeyboardButton(
-                    #     text="⚡ Пропустить (авто)",
-                    #     callback_data=f"skip_report:{task_report.id}"
-                    # )]  # TODO: Disabled for now
+                    )]
+                ]
+
+                # Если есть готовый отчёт, добавляем кнопку просмотра
+                if task_report.report_text:
+                    keyboard_buttons.append([
+                        InlineKeyboardButton(
+                            text="👁️ Посмотреть отчёт",
+                            callback_data=f"preview_report:{task_report.id}"
+                        )
+                    ])
+
+                # ВСЕГДА добавляем кнопки одобрения
+                if has_client:
+                    # Если есть клиент - кнопка отправки
+                    keyboard_buttons.append([
+                        InlineKeyboardButton(
+                            text="✅ Одобрить и отправить клиенту",
+                            callback_data=f"approve_send:{task_report.id}"
+                        )
+                    ])
+
+                # ВСЕГДА добавляем кнопку "закрыть без отправки"
+                keyboard_buttons.append([
+                    InlineKeyboardButton(
+                        text="❌ Закрыть без отчёта клиенту",
+                        callback_data=f"close_no_report:{task_report.id}"
+                    )
                 ])
 
+                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
                 # Отправляем уведомление
+                from aiogram.types import LinkPreviewOptions
+
                 for admin_id in admin_list:
                     try:
                         await self.bot.send_message(
                             chat_id=admin_id,
                             text=notification_text,
                             reply_markup=keyboard,
-                            parse_mode="MarkdownV2"
+                            parse_mode="MarkdownV2",
+                            link_preview_options=LinkPreviewOptions(is_disabled=True)
                         )
                         bot_logger.info(
                             f"✅ Notified admin {admin_id} about TaskReport #{task_report.id}"

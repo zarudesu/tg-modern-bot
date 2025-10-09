@@ -245,30 +245,11 @@ async def callback_show_history(callback: CallbackQuery):
         await callback.answer("❌ Ошибка при переходе к истории")
 
 
-@router.callback_query(F.data == "daily_tasks")
-async def callback_daily_tasks(callback: CallbackQuery):
-    """Перенаправление к ежедневным задачам (использует модуль daily_tasks)"""
-    try:
-        admin_id = callback.from_user.id
-
-        # Проверяем права админа
-        if admin_id not in settings.admin_user_id_list:
-            await callback.answer("❌ У вас нет прав для этого действия", show_alert=True)
-            return
-
-        # Вызываем обработчик команды из модуля daily_tasks
-        from ..daily_tasks.handlers import cmd_daily_tasks
-
-        # Создаем фейковое сообщение для вызова обработчика
-        fake_message = callback.message
-        fake_message.from_user = callback.from_user
-
-        await callback.answer()
-        await cmd_daily_tasks(fake_message)
-
-    except Exception as e:
-        bot_logger.error(f"Callback daily_tasks error: {e}")
-        await callback.answer("❌ Ошибка при переходе к задачам")
+# @router.callback_query(F.data == "daily_tasks")  # REMOVED: handled in daily_tasks module
+# async def callback_daily_tasks(callback: CallbackQuery):
+#     """Перенаправление к ежедневным задачам (использует модуль daily_tasks)"""
+#     # This callback is now handled in app/modules/daily_tasks/callback_handlers.py
+#     pass
 
 
 @router.callback_query(F.data == "daily_settings")
@@ -416,6 +397,39 @@ async def callback_show_profile(callback: CallbackQuery):
     except Exception as e:
         bot_logger.error(f"Callback show_profile error: {e}")
         await callback.answer("❌ Ошибка при показе профиля")
+
+
+@router.callback_query(F.data == "main_menu")
+async def callback_main_menu(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню"""
+    try:
+        # Clear any FSM state
+        await state.clear()
+
+        # Show main menu (same as /start)
+        user_id = callback.from_user.id
+        username = callback.from_user.username or "User"
+
+        # Check if admin
+        is_admin = user_id in settings.admin_user_ids
+
+        if is_admin:
+            keyboard = create_admin_start_keyboard()
+        else:
+            keyboard = create_user_start_keyboard()
+
+        await callback.message.edit_text(
+            f"🏠 **Главное меню**\n\n"
+            f"Привет, @{username}!\n"
+            f"Выберите действие:",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"Callback main_menu error: {e}")
+        await callback.answer("❌ Ошибка при возврате в меню")
 
 
 # Команды для меню бота

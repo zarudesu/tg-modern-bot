@@ -2,9 +2,9 @@
 
 .PHONY: help install dev-install test clean build
 .PHONY: db-up db-down db-logs db-shell db-backup db-restore
-.PHONY: bot-up bot-down bot-logs bot-shell bot-start bot-stop bot-restart bot-status
+.PHONY: bot-up bot-down bot-logs bot-shell bot-start bot-stop bot-restart bot-status bot-rebuild bot-rebuild-clean
 .PHONY: dev dev-stop dev-restart
-.PHONY: full-up full-down full-logs full-clean
+.PHONY: full-up full-down full-logs full-rebuild full-rebuild-clean full-clean
 
 # Показать помощь
 help:
@@ -50,17 +50,21 @@ help:
 	@echo "  db-admin     - Запустить pgAdmin (веб-интерфейс)"
 	@echo ""
 	@echo "🤖 Управление ботом (независимо):"
-	@echo "  bot-up       - Запустить только бота (подключится к БД)"
-	@echo "  bot-down     - Остановить бота"
-	@echo "  bot-logs     - Показать логи бота"
-	@echo "  bot-shell    - Войти в контейнер бота"
-	@echo "  bot-dev      - Запустить бота в режиме разработки"
+	@echo "  bot-up              - Запустить только бота (подключится к БД)"
+	@echo "  bot-down            - Остановить бота"
+	@echo "  bot-logs            - Показать логи бота"
+	@echo "  bot-shell           - Войти в контейнер бота"
+	@echo "  bot-dev             - Запустить бота в режиме разработки"
+	@echo "  bot-rebuild         - Пересобрать бота (с кэшем) + пересоздать контейнер"
+	@echo "  bot-rebuild-clean   - Полная пересборка бота (без кэша, после изменений кода!)"
 	@echo ""
-	@echo "🚀 Полный стек:"
-	@echo "  full-up      - Запустить всё (БД + бот)"
-	@echo "  full-down    - Остановить всё"
-	@echo "  full-logs    - Показать логи всего стека"
-	@echo "  full-clean   - Полная очистка (удалить все данные)"
+	@echo "🚀 Полный стек (БД + Redis + Bot):"
+	@echo "  full-up             - Запустить всё"
+	@echo "  full-down           - Остановить всё"
+	@echo "  full-logs           - Показать логи всего стека"
+	@echo "  full-rebuild        - Пересобрать стек (с кэшем) + пересоздать контейнер"
+	@echo "  full-rebuild-clean  - Полная пересборка стека (без кэша, после изменений кода!)"
+	@echo "  full-clean          - Полная очистка (удалить все данные)"
 
 # =====================================
 # Установка и разработка
@@ -144,6 +148,20 @@ bot-down:
 bot-logs:
 	docker-compose -f docker-compose.bot.yml logs -f telegram-bot
 
+bot-rebuild:
+	@echo "🔨 Пересборка бота (с кэшем)..."
+	docker-compose -f docker-compose.bot.yml build
+	docker-compose -f docker-compose.bot.yml up -d --force-recreate
+	@echo "✅ Бот пересобран и перезапущен!"
+
+bot-rebuild-clean:
+	@echo "🔨 Полная пересборка бота (без кэша)..."
+	docker-compose -f docker-compose.bot.yml build --no-cache
+	docker-compose -f docker-compose.bot.yml up -d --force-recreate
+	@echo "✅ Бот пересобран с нуля и перезапущен!"
+	@echo ""
+	@echo "💡 Используйте эту команду после изменения кода для Docker!"
+
 bot-shell:
 	docker-compose -f docker-compose.bot.yml exec telegram-bot bash
 
@@ -161,7 +179,7 @@ bot-dev:
 # =====================================
 
 full-up:
-	@echo "🚀 Запускаем полный стек..."
+	@echo "🚀 Запускаем полный стек (PostgreSQL + Redis + Bot)..."
 	docker-compose up -d
 	@echo "✅ Полный стек запущен!"
 
@@ -171,6 +189,20 @@ full-down:
 
 full-logs:
 	docker-compose logs -f
+
+full-rebuild:
+	@echo "🔨 Пересборка полного стека (с кэшем)..."
+	docker-compose build
+	docker-compose up -d --force-recreate
+	@echo "✅ Полный стек пересобран!"
+
+full-rebuild-clean:
+	@echo "🔨 Полная пересборка стека (без кэша)..."
+	docker-compose build --no-cache
+	docker-compose up -d --force-recreate
+	@echo "✅ Полный стек пересобран с нуля!"
+	@echo ""
+	@echo "💡 Используйте эту команду после изменения кода для Docker!"
 
 full-clean:
 	@echo "⚠️  ВНИМАНИЕ: Это удалит ВСЕ данные!"

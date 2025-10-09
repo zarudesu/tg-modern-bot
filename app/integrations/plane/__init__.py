@@ -6,6 +6,7 @@ This module provides a clean interface to Plane.so API with:
 - Pydantic models for data validation
 - Separate managers for tasks, projects, and users
 - Comprehensive logging and error handling
+- DIRECT PostgreSQL DATABASE ACCESS (bypasses rate-limited API)
 """
 import aiohttp
 from typing import List, Dict, Any, Optional
@@ -16,6 +17,7 @@ from .models import PlaneTask, PlaneProject, PlaneUser, PlaneState
 from .projects import PlaneProjectsManager
 from .users import PlaneUsersManager
 from .tasks import PlaneTasksManager
+from .database import plane_db_client  # NEW: Direct DB access
 from .exceptions import (
     PlaneAPIError,
     PlaneAuthError,
@@ -103,6 +105,9 @@ class PlaneAPI:
         """
         Get all tasks assigned to user by email
 
+        ⚡ OPTIMIZATION: Removed unnecessary states requests + sequential with delays
+        This reduces 52+ API calls to 26 calls with proper rate limit handling.
+
         Args:
             user_email: Email address of the user
 
@@ -118,8 +123,15 @@ class PlaneAPI:
             return []
 
         try:
+            # ⚡ МАКСИМАЛЬНАЯ СКОРОСТЬ: коннектор с 50 одновременными соединениями
+            connector = aiohttp.TCPConnector(
+                limit=50,  # Максимум 50 одновременных запросов
+                limit_per_host=50,  # К одному хосту (Plane API)
+                ttl_dns_cache=300  # Кэш DNS на 5 минут
+            )
             async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30, connect=10)
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(total=60, connect=5)  # Быстрые таймауты
             ) as session:
                 return await self._tasks_manager.get_user_tasks(session, user_email)
 
@@ -218,6 +230,99 @@ class PlaneAPI:
                 )
         except Exception as e:
             bot_logger.error(f"Error creating issue: {e}")
+            return None
+
+    async def get_issue_details(
+        self,
+        project_id: str,
+        issue_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get full issue details including description
+
+        Args:
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+
+        Returns:
+            Full issue data or None on failure
+        """
+        if not self.configured:
+            bot_logger.error("Plane API not configured")
+            return None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.get_issue_details(
+                    session=session,
+                    project_id=project_id,
+                    issue_id=issue_id
+                )
+        except Exception as e:
+            bot_logger.error(f"Error getting issue details: {e}")
+            return None
+
+    async def get_issue_comments(
+        self,
+        project_id: str,
+        issue_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all comments for an issue
+
+        Args:
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+
+        Returns:
+            List of comment objects
+        """
+        if not self.configured:
+            bot_logger.error("Plane API not configured")
+            return []
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.get_issue_comments(
+                    session=session,
+                    project_id=project_id,
+                    issue_id=issue_id
+                )
+        except Exception as e:
+            bot_logger.error(f"Error getting issue comments: {e}")
+            return []
+
+    async def create_issue_comment(
+        self,
+        project_id: str,
+        issue_id: str,
+        comment: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a comment on an issue
+
+        Args:
+            project_id: Plane project UUID
+            issue_id: Plane issue UUID
+            comment: Comment text
+
+        Returns:
+            Created comment object or None
+        """
+        if not self.configured:
+            bot_logger.error("Plane API not configured")
+            return None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.create_issue_comment(
+                    session=session,
+                    project_id=project_id,
+                    issue_id=issue_id,
+                    comment=comment
+                )
+        except Exception as e:
+            bot_logger.error(f"Error creating comment: {e}")
             return None
 
 

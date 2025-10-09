@@ -10,18 +10,11 @@ from aiogram.filters import Command
 from ...database.database import get_async_session
 from ...services.support_requests_service import support_requests_service
 from ...utils.logger import bot_logger
+from ...utils.markdown import escape_markdown_v2
 from ...config import settings
 
 
 router = Router()
-
-
-def escape_markdown_v2(text: str) -> str:
-    """Escape special characters for MarkdownV2"""
-    chars_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '@']
-    for char in chars_to_escape:
-        text = text.replace(char, f'\\{char}')
-    return text
 
 
 # Temporary storage for request data (chat_id -> request_data)
