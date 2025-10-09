@@ -251,15 +251,24 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
                     except Exception as e:
                         bot_logger.warning(f"Failed to parse workers JSON: {e}")
 
-                # Get user info
+                # Map telegram usernames to display names for Google Sheets/notifications
+                from ..utils import map_workers_to_display_names_list
+                workers_display_list = map_workers_to_display_names_list(workers_list)
+                bot_logger.info(f"📝 Mapped workers: {workers_list} → {workers_display_list}")
+
+                # Get user info (use Telegram API data, not DB - more up-to-date!)
                 from ....database.models import BotUser
                 user = await session.get(BotUser, callback.from_user.id)
 
-                if user:
-                    creator_name = f"@{user.username}" if user.username else (user.first_name or f"User_{callback.from_user.id}")
-                    user_email = f"{user.username}@example.com" if user.username else f"user_{callback.from_user.id}@telegram.bot"
+                # Use callback.from_user for current username (not DB which can be stale)
+                if callback.from_user.username:
+                    creator_name = f"@{callback.from_user.username}"
+                    user_email = f"{callback.from_user.username}@example.com"
+                elif user and user.first_name:
+                    creator_name = user.first_name
+                    user_email = f"user_{callback.from_user.id}@telegram.bot"
                 else:
-                    creator_name = f"User_{callback.from_user.id}"
+                    creator_name = callback.from_user.first_name or f"User_{callback.from_user.id}"
                     user_email = f"user_{callback.from_user.id}@telegram.bot"
 
                 # Create work journal entry
@@ -279,7 +288,7 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
                     work_duration=task_report.work_duration,
                     work_description=task_report.report_text or "",
                     is_travel=task_report.is_travel or False,
-                    worker_names=workers_list,
+                    worker_names=workers_display_list,  # Use display names for Google Sheets
                     created_by_user_id=callback.from_user.id,
                     created_by_name=creator_name
                 )
@@ -421,15 +430,24 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
                 except Exception as e:
                     bot_logger.warning(f"Failed to parse workers JSON: {e}")
 
-            # Get user info
+            # Map telegram usernames to display names for Google Sheets/notifications
+            from ..utils import map_workers_to_display_names_list
+            workers_display_list = map_workers_to_display_names_list(workers_list)
+            bot_logger.info(f"📝 Mapped workers: {workers_list} → {workers_display_list}")
+
+            # Get user info (use Telegram API data, not DB - more up-to-date!)
             from ....database.models import BotUser
             user = await session.get(BotUser, callback.from_user.id)
 
-            if user:
-                creator_name = f"@{user.username}" if user.username else (user.first_name or f"User_{callback.from_user.id}")
-                user_email = f"{user.username}@example.com" if user.username else f"user_{callback.from_user.id}@telegram.bot"
+            # Use callback.from_user for current username (not DB which can be stale)
+            if callback.from_user.username:
+                creator_name = f"@{callback.from_user.username}"
+                user_email = f"{callback.from_user.username}@example.com"
+            elif user and user.first_name:
+                creator_name = user.first_name
+                user_email = f"user_{callback.from_user.id}@telegram.bot"
             else:
-                creator_name = f"User_{callback.from_user.id}"
+                creator_name = callback.from_user.first_name or f"User_{callback.from_user.id}"
                 user_email = f"user_{callback.from_user.id}@telegram.bot"
 
             # Create work journal entry
@@ -449,7 +467,7 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
                 work_duration=task_report.work_duration,
                 work_description=task_report.report_text or "",
                 is_travel=task_report.is_travel or False,
-                worker_names=workers_list,
+                worker_names=workers_display_list,  # Use display names for Google Sheets
                 created_by_user_id=callback.from_user.id,
                 created_by_name=creator_name
             )

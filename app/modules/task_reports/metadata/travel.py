@@ -98,10 +98,10 @@ async def callback_work_type(callback: CallbackQuery, state: FSMContext):
             )
 
             await callback.message.edit_text(
-                f"✅ Тип работы: **{work_type_display}**\n\n"
-                f"🏢 **Выберите компанию**\n\n"
+                f"✅ Тип работы: <b>{work_type_display}</b>\n\n"
+                f"🏢 <b>Выберите компанию</b>\n\n"
                 f"{'_Первой показана компания из Plane_' if plane_company else ''}",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
             await callback.answer()

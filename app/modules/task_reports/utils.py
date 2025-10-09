@@ -43,6 +43,23 @@ def map_workers_to_display_names(workers_list: list) -> str:
     return ", ".join(display_names)
 
 
+def map_workers_to_display_names_list(workers_list: list) -> list:
+    """
+    Map telegram usernames to display names (returns list for work_journal)
+
+    Args:
+        workers_list: List of telegram usernames (e.g., ["zardes", "dima_gusev"])
+
+    Returns:
+        list: List of display names (e.g., ["Костя", "Дима"])
+    """
+    display_names = []
+    for worker in workers_list:
+        display_name = TELEGRAM_TO_DISPLAY_NAME.get(worker, worker)
+        display_names.append(display_name)
+    return display_names
+
+
 def map_worker_to_handle(telegram_username: str) -> str:
     """
     Map telegram username to @handle for group messages

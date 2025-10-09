@@ -48,8 +48,9 @@ async def callback_agree_text(callback: CallbackQuery, state: FSMContext):
         keyboard = create_duration_keyboard(task_report_id)
 
         await callback.message.edit_text(
-            "⏱️ **Укажите длительность работы**\n\n"
+            "⏱️ <b>Укажите длительность работы</b>\n\n"
             "Выберите из предложенных вариантов или укажите своё время:",
+            parse_mode="HTML",
             reply_markup=keyboard
         )
 
@@ -120,8 +121,9 @@ async def callback_duration(callback: CallbackQuery, state: FSMContext):
             keyboard = create_work_type_keyboard(task_report_id)
 
             await callback.message.edit_text(
-                f"✅ Длительность: **{duration}**\n\n"
-                f"🚗 **Был ли выезд к клиенту?**",
+                f"✅ Длительность: <b>{duration}</b>\n\n"
+                f"🚗 <b>Был ли выезд к клиенту?</b>",
+                parse_mode="HTML",
                 reply_markup=keyboard
             )
 
@@ -157,14 +159,14 @@ async def callback_custom_duration(callback: CallbackQuery, state: FSMContext):
         await state.update_data(awaiting_custom_duration=True)
 
         await callback.message.edit_text(
-            "⏱️ **Введите длительность работы**\n\n"
+            "⏱️ <b>Введите длительность работы</b>\n\n"
             "Примеры:\n"
-            "• `2 часа`\n"
-            "• `1.5 часа`\n"
-            "• `30 мин`\n"
-            "• `1 час 30 мин`\n\n"
+            "• 2 часа\n"
+            "• 1.5 часа\n"
+            "• 30 мин\n"
+            "• 1 час 30 мин\n\n"
             "Формат: количество + единица измерения",
-            
+            parse_mode="HTML"
         )
 
         await callback.answer()
@@ -221,12 +223,12 @@ async def handle_custom_duration(message: Message, state: FSMContext):
                 duration_minutes = int(text)
             except ValueError:
                 await message.reply(
-                    "❌ **Неверный формат времени**\n\n"
+                    "❌ <b>Неверный формат времени</b>\n\n"
                     "Введите время в формате:\n"
-                    "• `2 часа`\n"
-                    "• `30 мин`\n"
-                    "• `1 час 30 мин`",
-                    
+                    "• 2 часа\n"
+                    "• 30 мин\n"
+                    "• 1 час 30 мин",
+                    parse_mode="HTML"
                 )
                 return
 
@@ -309,8 +311,9 @@ async def handle_custom_duration(message: Message, state: FSMContext):
             keyboard = create_work_type_keyboard(task_report_id)
 
             await message.reply(
-                f"✅ Длительность: **{formatted_duration}**\n\n"
-                f"🚗 **Был ли выезд к клиенту?**",
+                f"✅ Длительность: <b>{formatted_duration}</b>\n\n"
+                f"🚗 <b>Был ли выезд к клиенту?</b>",
+                parse_mode="HTML",
                 reply_markup=keyboard
             )
 

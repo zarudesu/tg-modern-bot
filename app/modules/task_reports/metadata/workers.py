@@ -184,8 +184,7 @@ async def callback_add_worker(callback: CallbackQuery, state: FSMContext):
 
         await callback.message.edit_text(
             "👤 **Введите ФИО исполнителя**\n\n"
-            "Напишите имя исполнителя (будет добавлен к списку):",
-            
+            "Напишите имя исполнителя (будет добавлен к списку):"
         )
 
         await callback.answer()
@@ -257,9 +256,10 @@ async def handle_custom_worker(message: Message, state: FSMContext):
         )
 
         await message.reply(
-            f"✅ Добавлен исполнитель: **{worker}**\n\n"
-            f"👥 **Выберите исполнителей**\n\n"
+            f"✅ Добавлен исполнитель: <b>{worker}</b>\n\n"
+            f"👥 <b>Выберите исполнителей</b>\n\n"
             f"Можно выбрать несколько:",
+            parse_mode="HTML",
             reply_markup=keyboard
         )
 
@@ -358,14 +358,22 @@ async def callback_confirm_workers(callback: CallbackQuery, state: FSMContext):
             # Show "Preview" button (not the full preview itself)
             from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+            # Use HTML parse mode to avoid MarkdownV2 escaping issues
+            duration_text = task_report.work_duration or '⚠️ Не указано'
+            company_text = task_report.company or '⚠️ Не указано'
+            workers_text = ', '.join(selected_workers) if selected_workers else '⚠️ Не указано'
+            work_type_text = 'Выезд' if task_report.is_travel else 'Удалённо'
+            status_text = '✅ Отчёт автоматически заполнен из Plane' if task_report.report_text else '⚠️ Отчёт пустой - заполните вручную'
+
             await callback.message.edit_text(
-                f"✅ **Метаданные собраны!**\n\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\n"
-                f"⏱️ Длительность: **{task_report.work_duration or '⚠️ Не указано'}**\n"
-                f"🚗 Тип работы: **{'Выезд' if task_report.is_travel else 'Удалённо'}**\n"
-                f"🏢 Компания: **{task_report.company or '⚠️ Не указано'}**\n"
-                f"👥 Исполнители: **{', '.join(selected_workers) if selected_workers else '⚠️ Не указано'}**\n\n"
-                f"{'✅ Отчёт автоматически заполнен из Plane' if task_report.report_text else '⚠️ Отчёт пустой - заполните вручную'}",
+                f"✅ <b>Метаданные собраны!</b>\n\n"
+                f"<b>Задача:</b> #{task_report.plane_sequence_id}\n"
+                f"⏱️ Длительность: <b>{duration_text}</b>\n"
+                f"🚗 Тип работы: <b>{work_type_text}</b>\n"
+                f"🏢 Компания: <b>{company_text}</b>\n"
+                f"👥 Исполнители: <b>{workers_text}</b>\n\n"
+                f"{status_text}",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
                         text="👁️ Предпросмотр отчёта",

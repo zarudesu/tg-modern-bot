@@ -112,11 +112,11 @@ async def callback_company(callback: CallbackQuery, state: FSMContext):
             )
 
             await callback.message.edit_text(
-                f"✅ Компания: **{company}**\n\n"
-                f"👥 **Выберите исполнителей**\n\n"
+                f"✅ Компания: <b>{company}</b>\n\n"
+                f"👥 <b>Выберите исполнителей</b>\n\n"
                 f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
                 f"Можно выбрать несколько:",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
             await callback.answer()
@@ -151,7 +151,7 @@ async def callback_custom_company(callback: CallbackQuery, state: FSMContext):
         await state.update_data(awaiting_custom_company=True)
 
         await callback.message.edit_text(
-            "🏢 **Введите название компании**\n\n"
+            "🏢 <b>Введите название компании</b>\n\n"
             "Напишите название компании (будет сохранено для дальнейшего использования):",
             
         )
@@ -228,8 +228,8 @@ async def handle_custom_company(message: Message, state: FSMContext):
         )
 
         await message.reply(
-            f"✅ Компания: **{company}**\n\n"
-            f"👥 **Выберите исполнителей**\n\n"
+            f"✅ Компания: <b>{company}</b>\n\n"
+            f"👥 <b>Выберите исполнителей</b>\n\n"
             f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
             f"Можно выбрать несколько:",
             reply_markup=keyboard

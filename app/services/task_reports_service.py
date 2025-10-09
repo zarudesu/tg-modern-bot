@@ -508,23 +508,23 @@ class TaskReportsService:
         """
         report_lines = []
 
-        # Header
+        # Header (no markdown - will be displayed in HTML mode)
         if sequence_id:
-            report_lines.append(f"📋 **Отчёт по задаче HHIVP-{sequence_id}**\n")
+            report_lines.append(f"📋 Отчёт по задаче HHIVP-{sequence_id}\n")
         else:
-            report_lines.append(f"📋 **Отчёт по выполненной задаче**\n")
+            report_lines.append(f"📋 Отчёт по выполненной задаче\n")
 
         # Task title
         if title:
-            report_lines.append(f"**Задача:** {title}\n")
+            report_lines.append(f"Задача: {title}\n")
 
         # Description (if meaningful)
         if description and len(description.strip()) > 10:
-            report_lines.append(f"**Описание:**\n{description}\n")
+            report_lines.append(f"Описание:\n{description}\n")
 
         # Comments (main content)
         if comments:
-            report_lines.append(f"**Выполненные работы:**\n")
+            report_lines.append(f"Выполненные работы:\n")
             bot_logger.info(f"🔨 Processing {len(comments)} comments for report generation")
 
             # FETCH workspace members ONCE for UUID → name mapping
@@ -726,9 +726,9 @@ class TaskReportsService:
                 )
                 return False
 
-            # Build report text from entries
+            # Build report text from entries (no markdown - displayed in HTML mode)
             report_lines = [
-                f"**Выполненные работы по задаче #{task_report.plane_sequence_id}:**\n"
+                f"Выполненные работы по задаче #{task_report.plane_sequence_id}:\n"
             ]
 
             for entry in entries:
@@ -756,10 +756,10 @@ class TaskReportsService:
 
                 # Формируем запись
                 report_lines.append(
-                    f"📅 **{date_str}** | {work_type} | ⏱️ {duration_str}\n"
-                    f"🏢 **Компания:** {company_str}\n"
-                    f"👥 **Исполнители:** {workers_str}\n"
-                    f"📝 **Описание:**\n{work_desc}\n"
+                    f"📅 {date_str} | {work_type} | ⏱️ {duration_str}\n"
+                    f"🏢 Компания: {company_str}\n"
+                    f"👥 Исполнители: {workers_str}\n"
+                    f"📝 Описание:\n{work_desc}\n"
                 )
 
             autofilled_text = "\n".join(report_lines)

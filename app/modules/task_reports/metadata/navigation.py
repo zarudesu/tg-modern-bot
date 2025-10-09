@@ -52,9 +52,9 @@ async def callback_back_to_duration(callback: CallbackQuery, state: FSMContext):
         keyboard = create_duration_keyboard(task_report_id)
 
         await callback.message.edit_text(
-            "⏱️ **Укажите длительность работы**\n\n"
+            "⏱️ <b>Укажите длительность работы</b>\n\n"
             "Выберите из предложенных вариантов или укажите своё время:",
-            reply_markup=keyboard
+            parse_mode="HTML", reply_markup=keyboard
         )
 
         await callback.answer()
@@ -86,8 +86,8 @@ async def callback_back_to_work_type(callback: CallbackQuery, state: FSMContext)
         keyboard = create_work_type_keyboard(task_report_id)
 
         await callback.message.edit_text(
-            "🚗 **Был ли выезд к клиенту?**",
-            reply_markup=keyboard
+            "🚗 <b>Был ли выезд к клиенту?</b>",
+            parse_mode="HTML", reply_markup=keyboard
         )
 
         await callback.answer()
@@ -132,9 +132,9 @@ async def callback_back_to_company(callback: CallbackQuery, state: FSMContext):
         )
 
         await callback.message.edit_text(
-            f"🏢 **Выберите компанию**\n\n"
+            f"🏢 <b>Выберите компанию</b>\n\n"
             f"{'_Первой показана компания из Plane_' if plane_company else ''}",
-            reply_markup=keyboard
+            parse_mode="HTML", reply_markup=keyboard
         )
 
         await callback.answer()
@@ -195,7 +195,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             # Redirect to text editing
             await state.set_state(TaskReportStates.filling_report)
             await callback.message.edit_text(
-                "📝 **Редактирование текста отчёта**\n\n"
+                "📝 <b>Редактирование текста отчёта</b>\n\n"
                 "Отправьте новый текст отчёта:",
                 
             )
@@ -205,9 +205,9 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await state.set_state(TaskReportStates.filling_duration)
             keyboard = create_duration_keyboard(task_report_id)
             await callback.message.edit_text(
-                "⏱️ **Редактирование длительности**\n\n"
+                "⏱️ <b>Редактирование длительности</b>\n\n"
                 "Выберите новую длительность:",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
         elif field_name == "work_type":
@@ -215,9 +215,9 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await state.set_state(TaskReportStates.filling_work_type)
             keyboard = create_work_type_keyboard(task_report_id)
             await callback.message.edit_text(
-                "🚗 **Редактирование типа работы**\n\n"
+                "🚗 <b>Редактирование типа работы</b>\n\n"
                 "Был ли выезд к клиенту?",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
         elif field_name == "company":
@@ -226,7 +226,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
 
             async for session in get_async_session():
                 wj_service = work_journal_service.WorkJournalService(session)
-            companies = await wj_service.get_companies()
+                companies = await wj_service.get_companies()
 
             state_data = await state.get_data()
             plane_company = state_data.get("plane_project_name")
@@ -238,9 +238,9 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             )
 
             await callback.message.edit_text(
-                "🏢 **Редактирование компании**\n\n"
+                "🏢 <b>Редактирование компании</b>\n\n"
                 "Выберите компанию:",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
         elif field_name == "workers":
@@ -308,9 +308,9 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             )
 
             await callback.message.edit_text(
-                "👥 **Редактирование исполнителей**\n\n"
+                "👥 <b>Редактирование исполнителей</b>\n\n"
                 "Выберите исполнителей:",
-                reply_markup=keyboard
+                parse_mode="HTML", reply_markup=keyboard
             )
 
         await callback.answer()
