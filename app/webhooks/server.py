@@ -198,41 +198,8 @@ class WebhookServer:
                 await session.refresh(task_report)
                 bot_logger.info(f"🔄 Refreshed task_report from DB, description length: {len(task_report.task_description) if task_report.task_description else 0}")
 
-                # 📥 FETCH PLANE DATA (comments, assignees, priority, project name)
-                from ..integrations.plane import plane_api
-
-                plane_details = None
-                plane_comments = []
-                plane_project_name = None
-
-                if plane_api.configured and task_report.plane_project_id and task_report.plane_issue_id:
-                    try:
-                        bot_logger.info(f"📥 Fetching Plane details for notification...")
-
-                        # Fetch issue details (assignees, priority, state, labels)
-                        plane_details = await plane_api.get_issue_details(
-                            project_id=task_report.plane_project_id,
-                            issue_id=task_report.plane_issue_id
-                        )
-
-                        # Fetch comments
-                        plane_comments = await plane_api.get_issue_comments(
-                            project_id=task_report.plane_project_id,
-                            issue_id=task_report.plane_issue_id
-                        )
-
-                        # Get project name from cached projects list
-                        projects = await plane_api.get_all_projects()
-                        project_match = next((p for p in projects if p['id'] == task_report.plane_project_id), None)
-                        if project_match:
-                            plane_project_name = project_match['name']
-
-                        bot_logger.info(
-                            f"✅ Fetched Plane data: {len(plane_comments)} comments, "
-                            f"project={plane_project_name}, priority={plane_details.get('priority') if plane_details else None}"
-                        )
-                    except Exception as e:
-                        bot_logger.warning(f"⚠️ Failed to fetch Plane data for notification: {e}")
+                # ✅ USE DATA FROM task_report (already fetched in create_task_report_from_webhook)
+                # No duplicate Plane API calls needed - all data is in task_report
 
                 # Отправляем уведомление админу (приоритет - кто закрыл)
                 admin_to_notify = task_report.closed_by_telegram_id
@@ -263,75 +230,30 @@ class WebhookServer:
                 task_title = escape_md(task_report.task_title or 'Не указано')
                 closed_by = escape_md(task_report.closed_by_plane_name or 'Неизвестно')
 
-                # Project name (from Plane API or webhook data)
-                project_name = plane_project_name or data.get('project_name', '')
-                project_line = f"**Проект:** {escape_md(project_name)}\n" if project_name else ""
+                # Project name (from task_report.company - already mapped via COMPANY_MAPPING)
+                project_line = ""
+                if task_report.company:
+                    project_line = f"**Проект:** {escape_md(task_report.company)}\n"
 
-                # Priority from Plane (if available)
-                priority_line = ""
-                if plane_details and plane_details.get('priority'):
-                    priority_map = {
-                        'urgent': '🔴 Срочно',
-                        'high': '🟠 Высокий',
-                        'medium': '🟡 Средний',
-                        'low': '🟢 Низкий',
-                        'none': '⚪ Не указан'
-                    }
-                    priority_text = priority_map.get(plane_details['priority'], plane_details['priority'])
-                    priority_line = f"**Приоритет:** {escape_md(priority_text)}\n"
-
-                # Assignees from Plane (if available)
+                # Workers/Assignees (from task_report.workers - already auto-filled)
                 assignees_line = ""
-                if plane_details and plane_details.get('assignee_details'):
-                    assignees = plane_details['assignee_details']
-                    if isinstance(assignees, list) and assignees:
-                        assignee_names = [
-                            assignee.get('display_name') or assignee.get('first_name', 'Unknown')
-                            for assignee in assignees
-                        ]
-                        assignees_text = ", ".join(assignee_names)
-                        assignees_line = f"**Исполнители:** {escape_md(assignees_text)}\n"
+                if task_report.workers:
+                    try:
+                        workers = json.loads(task_report.workers)
+                        if isinstance(workers, list) and workers:
+                            workers_text = ", ".join(workers)
+                            assignees_line = f"**Исполнители:** {escape_md(workers_text)}\n"
+                    except:
+                        pass
 
-                # Task description preview
-                description_preview = ""
-                if task_report.task_description and len(task_report.task_description.strip()) > 10:
-                    desc_text = task_report.task_description.strip()
-                    # Truncate long descriptions
-                    if len(desc_text) > 150:
-                        desc_text = desc_text[:147] + "..."
-                    description_preview = f"\n**📄 Описание:**\n_{escape_md(desc_text)}_\n"
-
-                # Comments preview (first 3 comments)
-                comments_preview = ""
-                if plane_comments:
-                    comments_preview = f"\n**💬 Комментарии \\({len(plane_comments)}\\):**\n"
-                    for idx, comment in enumerate(plane_comments[:3], 1):
-                        # Try both 'comment_html' and 'comment' fields
-                        comment_html = comment.get('comment_html', '').strip()
-                        comment_text = comment.get('comment', '').strip()
-
-                        # Prefer comment_html, fallback to comment
-                        text_to_show = comment_html or comment_text
-
-                        if text_to_show:
-                            # Strip HTML tags from comment_html
-                            import re
-                            text_to_show = re.sub(r'<[^>]+>', '', text_to_show).strip()
-
-                            # Truncate long comments
-                            if len(text_to_show) > 100:
-                                text_to_show = text_to_show[:97] + "..."
-
-                            actor_detail = comment.get('actor_detail', {})
-                            actor_name = (
-                                actor_detail.get('display_name') or
-                                actor_detail.get('first_name') or
-                                'Unknown'
-                            )
-                            comments_preview += f"{idx}\\. _{escape_md(actor_name)}_: {escape_md(text_to_show)}\n"
-
-                    if len(plane_comments) > 3:
-                        comments_preview += f"_\\.\\.\\. и ещё {len(plane_comments) - 3} комментариев_\n"
+                # Report text preview (if auto-generated)
+                report_preview = ""
+                if task_report.report_text and len(task_report.report_text.strip()) > 50:
+                    report_text = task_report.report_text.strip()
+                    # Truncate long reports
+                    if len(report_text) > 200:
+                        report_text = report_text[:197] + "..."
+                    report_preview = f"\n**📝 Отчёт \\(preview\\):**\n_{escape_md(report_text)}_\n"
 
                 # Build Plane task URL
                 plane_url = f"https://plane.hhivp.com/hhivp/projects/{task_report.plane_project_id}/issues/{task_report.plane_issue_id}"
@@ -352,12 +274,10 @@ class WebhookServer:
                     f"**Задача:** \\#{task_report.plane_sequence_id}\n"
                     f"**Название:** {task_title}\n"
                     f"{project_line}"
-                    f"{priority_line}"
                     f"{assignees_line}"
                     f"**Закрыл:** {closed_by}\n"
                     f"{client_info}\n"
-                    f"{description_preview}"
-                    f"{comments_preview}"
+                    f"{report_preview}"
                     f"\n{plane_link}{autofill_notice}"
                 )
 
