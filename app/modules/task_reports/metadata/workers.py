@@ -185,7 +185,7 @@ async def callback_add_worker(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "👤 **Введите ФИО исполнителя**\n\n"
             "Напишите имя исполнителя (будет добавлен к списку):",
-            parse_mode="Markdown"
+            
         )
 
         await callback.answer()
@@ -217,7 +217,7 @@ async def handle_custom_worker(message: Message, state: FSMContext):
         if len(worker) < 2:
             await message.reply(
                 "❌ Имя исполнителя слишком короткое (минимум 2 символа).",
-                parse_mode="Markdown"
+                
             )
             return
 
@@ -260,7 +260,6 @@ async def handle_custom_worker(message: Message, state: FSMContext):
             f"✅ Добавлен исполнитель: **{worker}**\n\n"
             f"👥 **Выберите исполнителей**\n\n"
             f"Можно выбрать несколько:",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 
@@ -367,7 +366,6 @@ async def callback_confirm_workers(callback: CallbackQuery, state: FSMContext):
                 f"🏢 Компания: **{task_report.company or '⚠️ Не указано'}**\n"
                 f"👥 Исполнители: **{', '.join(selected_workers) if selected_workers else '⚠️ Не указано'}**\n\n"
                 f"{'✅ Отчёт автоматически заполнен из Plane' if task_report.report_text else '⚠️ Отчёт пустой - заполните вручную'}",
-                parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
                         text="👁️ Предпросмотр отчёта",

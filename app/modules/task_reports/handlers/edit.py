@@ -42,10 +42,14 @@ async def callback_edit_report(callback: CallbackQuery, state: FSMContext):
                 await callback.answer("❌ Отчёт не найден", show_alert=True)
                 return
 
-            # Format current metadata for display
-            duration_display = task_report.work_duration or "⚠️ Не указано"
+            # Format current metadata for display (with HTML escaping)
+            duration_raw = task_report.work_duration or "⚠️ Не указано"
+            duration_display = duration_raw.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
             work_type_display = "Выезд" if task_report.is_travel else "Удалённо" if task_report.is_travel is not None else "⚠️ Не указано"
-            company_display = task_report.company or "⚠️ Не указано"
+
+            company_raw = task_report.company or "⚠️ Не указано"
+            company_display = company_raw.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
             if task_report.workers:
                 try:
@@ -55,8 +59,10 @@ async def callback_edit_report(callback: CallbackQuery, state: FSMContext):
                     workers_display = task_report.workers
             else:
                 workers_display = "⚠️ Не указано"
+            workers_display = workers_display.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-            report_preview = task_report.report_text[:100] + "..." if task_report.report_text and len(task_report.report_text) > 100 else task_report.report_text or "⚠️ Не заполнено"
+            report_raw = task_report.report_text[:100] + "..." if task_report.report_text and len(task_report.report_text) > 100 else task_report.report_text or "⚠️ Не заполнено"
+            report_preview = report_raw.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
             # Build edit menu
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -91,10 +97,10 @@ async def callback_edit_report(callback: CallbackQuery, state: FSMContext):
             ])
 
             await callback.message.edit_text(
-                f"✏️ **Меню редактирования отчёта**\n\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\n\n"
+                f"✏️ <b>Меню редактирования отчёта</b>\n\n"
+                f"<b>Задача:</b> #{task_report.plane_sequence_id}\n\n"
                 f"Выберите поле для редактирования:",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=keyboard
             )
 

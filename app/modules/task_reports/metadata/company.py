@@ -116,7 +116,6 @@ async def callback_company(callback: CallbackQuery, state: FSMContext):
                 f"👥 **Выберите исполнителей**\n\n"
                 f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
                 f"Можно выбрать несколько:",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
@@ -154,7 +153,7 @@ async def callback_custom_company(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "🏢 **Введите название компании**\n\n"
             "Напишите название компании (будет сохранено для дальнейшего использования):",
-            parse_mode="Markdown"
+            
         )
 
         await callback.answer()
@@ -186,7 +185,7 @@ async def handle_custom_company(message: Message, state: FSMContext):
         if len(company) < 2:
             await message.reply(
                 "❌ Название компании слишком короткое (минимум 2 символа).",
-                parse_mode="Markdown"
+                
             )
             return
 
@@ -233,7 +232,6 @@ async def handle_custom_company(message: Message, state: FSMContext):
             f"👥 **Выберите исполнителей**\n\n"
             f"{'_Исполнители из Plane помечены_' if plane_assignees else ''}\n"
             f"Можно выбрать несколько:",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 

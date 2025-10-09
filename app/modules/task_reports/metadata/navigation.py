@@ -54,7 +54,6 @@ async def callback_back_to_duration(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "⏱️ **Укажите длительность работы**\n\n"
             "Выберите из предложенных вариантов или укажите своё время:",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 
@@ -88,7 +87,6 @@ async def callback_back_to_work_type(callback: CallbackQuery, state: FSMContext)
 
         await callback.message.edit_text(
             "🚗 **Был ли выезд к клиенту?**",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 
@@ -136,7 +134,6 @@ async def callback_back_to_company(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             f"🏢 **Выберите компанию**\n\n"
             f"{'_Первой показана компания из Plane_' if plane_company else ''}",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 
@@ -200,7 +197,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "📝 **Редактирование текста отчёта**\n\n"
                 "Отправьте новый текст отчёта:",
-                parse_mode="Markdown"
+                
             )
 
         elif field_name == "duration":
@@ -210,7 +207,6 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "⏱️ **Редактирование длительности**\n\n"
                 "Выберите новую длительность:",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
@@ -221,7 +217,6 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "🚗 **Редактирование типа работы**\n\n"
                 "Был ли выезд к клиенту?",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
@@ -245,7 +240,6 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "🏢 **Редактирование компании**\n\n"
                 "Выберите компанию:",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
@@ -283,7 +277,6 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "👥 **Редактирование исполнителей**\n\n"
                 "Выберите исполнителей:",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 

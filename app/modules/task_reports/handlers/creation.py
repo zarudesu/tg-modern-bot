@@ -114,15 +114,18 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
                 if len(task_report.report_text) > 500:
                     preview_text += "..."
 
+                # Escape HTML
+                preview_escaped = preview_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 autofill_notice = ""
                 if task_report.auto_filled_from_journal:
-                    autofill_notice = "\n\n✅ _Автоматически заполнено из work journal_"
+                    autofill_notice = "\n\n✅ <i>Автоматически заполнено из work journal</i>"
 
                 await callback.message.edit_text(
-                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\n\n"
-                    f"**Текущий текст отчёта:**\n{preview_text}{autofill_notice}\n\n"
+                    f"📝 <b>Заполнение отчёта для задачи #{task_report.plane_sequence_id}</b>\n\n"
+                    f"<b>Текущий текст отчёта:</b>\n{preview_escaped}{autofill_notice}\n\n"
                     f"Отправьте новый текст отчёта или согласуйте текущий:",
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="✅ Согласовать текст и продолжить",
@@ -138,11 +141,14 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
                 # НОВЫЙ ФЛОУ: Сразу показываем кнопки выбора длительности (метаданные)
                 from ..keyboards import create_duration_keyboard
 
+                # Escape task title
+                title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 await callback.message.edit_text(
-                    f"📝 **Заполнение отчёта для задачи #{task_report.plane_sequence_id}**\n\n"
-                    f"**Название задачи:** {task_report.task_title}\n\n"
-                    f"⏱️ **Шаг 1/4:** Выберите длительность работы:",
-                    parse_mode="Markdown",
+                    f"📝 <b>Заполнение отчёта для задачи #{task_report.plane_sequence_id}</b>\n\n"
+                    f"<b>Название задачи:</b> {title_escaped}\n\n"
+                    f"⏱️ <b>Шаг 1/4:</b> Выберите длительность работы:",
+                    parse_mode="HTML",
                     reply_markup=create_duration_keyboard(task_report_id)
                 )
 
@@ -181,8 +187,7 @@ async def handle_report_text(message: Message, state: FSMContext):
         if len(report_text) < 10:
             await message.reply(
                 "❌ Отчёт слишком короткий (минимум 10 символов).\n\n"
-                "Пожалуйста, опишите выполненную работу подробнее.",
-                parse_mode="Markdown"
+                "Пожалуйста, опишите выполненную работу подробнее."
             )
             return
 
@@ -208,10 +213,10 @@ async def handle_report_text(message: Message, state: FSMContext):
             keyboard = create_duration_keyboard(task_report_id)
 
             await message.reply(
-                f"✅ **Текст отчёта сохранён!**\n\n"
-                f"⏱️ **Укажите длительность работы**\n\n"
+                f"✅ <b>Текст отчёта сохранён!</b>\n\n"
+                f"⏱️ <b>Укажите длительность работы</b>\n\n"
                 f"Выберите из предложенных вариантов или укажите своё время:",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=keyboard
             )
 
@@ -243,8 +248,7 @@ async def callback_cancel_report(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "❌ Заполнение отчёта отменено.\n\n"
             "Напоминание будет отправлено позже.",
-            reply_markup=get_back_to_main_menu_keyboard(),
-            parse_mode="Markdown"
+            reply_markup=get_back_to_main_menu_keyboard()
         )
 
         # Clear FSM state

@@ -62,7 +62,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://bot_user:bot_password_2024@postgres:5432/telegram_bot
       - REDIS_URL=redis://:redis_password_2024@redis:6379/0
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    
+
+    ports:
+      - "8080:8080"  # Webhook server for n8n and Plane integrations
+
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro

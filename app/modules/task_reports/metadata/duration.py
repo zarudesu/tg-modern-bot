@@ -50,7 +50,6 @@ async def callback_agree_text(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "⏱️ **Укажите длительность работы**\n\n"
             "Выберите из предложенных вариантов или укажите своё время:",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 
@@ -123,7 +122,6 @@ async def callback_duration(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 f"✅ Длительность: **{duration}**\n\n"
                 f"🚗 **Был ли выезд к клиенту?**",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
@@ -166,7 +164,7 @@ async def callback_custom_duration(callback: CallbackQuery, state: FSMContext):
             "• `30 мин`\n"
             "• `1 час 30 мин`\n\n"
             "Формат: количество + единица измерения",
-            parse_mode="Markdown"
+            
         )
 
         await callback.answer()
@@ -228,7 +226,7 @@ async def handle_custom_duration(message: Message, state: FSMContext):
                     "• `2 часа`\n"
                     "• `30 мин`\n"
                     "• `1 час 30 мин`",
-                    parse_mode="Markdown"
+                    
                 )
                 return
 
@@ -280,7 +278,6 @@ async def handle_custom_duration(message: Message, state: FSMContext):
         await message.reply(
             f"✅ Длительность: **{formatted_duration}**\n\n"
             f"🚗 **Был ли выезд к клиенту?**",
-            parse_mode="Markdown",
             reply_markup=keyboard
         )
 

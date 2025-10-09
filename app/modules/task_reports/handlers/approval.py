@@ -54,10 +54,10 @@ async def callback_approve_report(callback: CallbackQuery, state: FSMContext):
 
             # Show confirmation
             await callback.message.edit_text(
-                f"✅ **Отчёт одобрен!**\n\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\n\n"
+                f"✅ <b>Отчёт одобрен!</b>\n\n"
+                f"<b>Задача:</b> #{task_report.plane_sequence_id}\n\n"
                 f"Отправить клиенту?",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
                         text="✅ Да, отправить",
@@ -112,17 +112,20 @@ async def callback_send_report(callback: CallbackQuery, state: FSMContext, bot: 
 
             # Send to client
             try:
-                # BUG FIX #4: Escape markdown to prevent API errors
+                # BUG FIX #4: Escape HTML to prevent API errors
+                title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                report_escaped = task_report.report_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 client_message = (
-                    f"✅ **Ваша заявка #{task_report.plane_sequence_id} выполнена!**\\n\\n"
-                    f"**Название:** {escape_markdown_v2(task_report.task_title)}\\n\\n"
-                    f"**Отчёт о выполненной работе:**\\n\\n{escape_markdown_v2(task_report.report_text)}"
+                    f"✅ <b>Ваша заявка #{task_report.plane_sequence_id} выполнена!</b>\n\n"
+                    f"<b>Название:</b> {title_escaped}\n\n"
+                    f"<b>Отчёт о выполненной работе:</b>\n\n{report_escaped}"
                 )
 
                 await bot.send_message(
                     chat_id=task_report.client_chat_id,
                     text=client_message,
-                    parse_mode="MarkdownV2",
+                    parse_mode="HTML",
                     reply_to_message_id=task_report.client_message_id  # Reply to original request
                 )
 
@@ -135,10 +138,10 @@ async def callback_send_report(callback: CallbackQuery, state: FSMContext, bot: 
 
                 # Notify admin
                 await callback.message.edit_text(
-                    f"✅ **Отчёт отправлен клиенту!**\n\n"
+                    f"✅ <b>Отчёт отправлен клиенту!</b>\n\n"
                     f"Задача #{task_report.plane_sequence_id} завершена.",
                     reply_markup=get_back_to_main_menu_keyboard(),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
                 # Clear FSM state
@@ -200,17 +203,20 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
 
             # Send to client
             try:
-                # BUG FIX #4: Escape markdown to prevent API errors
+                # BUG FIX #4: Escape HTML to prevent API errors
+                title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                report_escaped = task_report.report_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
                 client_message = (
-                    f"✅ **Ваша заявка #{task_report.plane_sequence_id} выполнена!**\\n\\n"
-                    f"**Название:** {escape_markdown_v2(task_report.task_title)}\\n\\n"
-                    f"**Отчёт о выполненной работе:**\\n\\n{escape_markdown_v2(task_report.report_text)}"
+                    f"✅ <b>Ваша заявка #{task_report.plane_sequence_id} выполнена!</b>\n\n"
+                    f"<b>Название:</b> {title_escaped}\n\n"
+                    f"<b>Отчёт о выполненной работе:</b>\n\n{report_escaped}"
                 )
 
                 await bot.send_message(
                     chat_id=task_report.client_chat_id,
                     text=client_message,
-                    parse_mode="MarkdownV2",
+                    parse_mode="HTML",
                     reply_to_message_id=task_report.client_message_id
                 )
 
@@ -333,13 +339,13 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
 
                 # Notify admin with full details
                 await callback.message.edit_text(
-                    f"✅ **Отчёт одобрен и отправлен клиенту!**\n\n"
+                    f"✅ <b>Отчёт одобрен и отправлен клиенту!</b>\n\n"
                     f"Задача #{task_report.plane_sequence_id} завершена.\n\n"
                     f"📋 Отчёт отправлен в чат клиента (reply)\n"
                     f"📊 Данные сохранены в Google Sheets\n"
                     f"👥 Уведомление отправлено в группу",
                     reply_markup=get_back_to_main_menu_keyboard(),
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
 
                 # Clear state
@@ -503,12 +509,12 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
 
             # Notify admin with main menu
             await callback.message.edit_text(
-                f"✅ **Отчёт одобрен!**\n\n"
+                f"✅ <b>Отчёт одобрен!</b>\n\n"
                 f"Задача #{task_report.plane_sequence_id} завершена.\n\n"
                 f"⚠️ Отчёт не был отправлен клиенту (нет привязки).\n"
                 f"📋 Отчёт сохранён в базе данных и добавлен в журнал работ.",
                 reply_markup=get_back_to_main_menu_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             # Clear state
@@ -565,14 +571,17 @@ async def callback_close_no_report(callback: CallbackQuery, state: FSMContext):
                 else "⚠️ Клиент не был привязан к задаче"
             )
 
+            # Escape HTML
+            title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
             await callback.message.edit_text(
-                f"✅ **Задача закрыта без отчёта клиенту**\n\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\n"
-                f"**Название:** {task_report.task_title}\n\n"
+                f"✅ <b>Задача закрыта без отчёта клиенту</b>\n\n"
+                f"<b>Задача:</b> #{task_report.plane_sequence_id}\n"
+                f"<b>Название:</b> {title_escaped}\n\n"
                 f"{client_status}\n\n"
                 f"📝 Задача завершена, отчёт сохранён в базе данных.",
                 reply_markup=get_back_to_main_menu_keyboard(),
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
 
             # Clear state

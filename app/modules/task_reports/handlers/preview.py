@@ -46,29 +46,35 @@ async def callback_preview_report(callback: CallbackQuery):
                 return
 
             # Show report preview with metadata
-            preview = task_report.report_text[:2000] if task_report.report_text else "⚠️ Отчёт не заполнен"
+            # Escape HTML characters in report text
+            preview_text = task_report.report_text[:2000] if task_report.report_text else "⚠️ Отчёт не заполнен"
             if task_report.report_text and len(task_report.report_text) > 2000:
-                preview += "\n\n[...]"
+                preview_text += "\n\n[...]"
+
+            # Escape HTML special chars
+            preview = preview_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
             has_client = bool(task_report.client_chat_id)
 
-            # Format metadata
-            metadata_text = "\n**МЕТАДАННЫЕ РАБОТЫ:**\n"
+            # Format metadata (HTML)
+            metadata_text = "\n<b>МЕТАДАННЫЕ РАБОТЫ:</b>\n"
 
             if task_report.work_duration:
-                metadata_text += f"⏱️ Длительность: **{task_report.work_duration}**\n"
+                duration_escaped = task_report.work_duration.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                metadata_text += f"⏱️ Длительность: <b>{duration_escaped}</b>\n"
             else:
-                metadata_text += "⏱️ Длительность: ⚠️ _Не указано_\n"
+                metadata_text += "⏱️ Длительность: ⚠️ <i>Не указано</i>\n"
 
             if task_report.is_travel is not None:
-                metadata_text += f"🚗 Тип работы: **{'Выезд' if task_report.is_travel else 'Удалённо'}**\n"
+                metadata_text += f"🚗 Тип работы: <b>{'Выезд' if task_report.is_travel else 'Удалённо'}</b>\n"
             else:
-                metadata_text += "🚗 Тип работы: ⚠️ _Не указано_\n"
+                metadata_text += "🚗 Тип работы: ⚠️ <i>Не указано</i>\n"
 
             if task_report.company:
-                metadata_text += f"🏢 Компания: **{task_report.company}**\n"
+                company_escaped = task_report.company.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                metadata_text += f"🏢 Компания: <b>{company_escaped}</b>\n"
             else:
-                metadata_text += "🏢 Компания: ⚠️ _Не указано_\n"
+                metadata_text += "🏢 Компания: ⚠️ <i>Не указано</i>\n"
 
             if task_report.workers:
                 try:
@@ -76,9 +82,10 @@ async def callback_preview_report(callback: CallbackQuery):
                     workers_display = ", ".join(workers_list)
                 except:
                     workers_display = task_report.workers
-                metadata_text += f"👥 Исполнители: **{workers_display}**\n"
+                workers_escaped = workers_display.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                metadata_text += f"👥 Исполнители: <b>{workers_escaped}</b>\n"
             else:
-                metadata_text += "👥 Исполнители: ⚠️ _Не указано_\n"
+                metadata_text += "👥 Исполнители: ⚠️ <i>Не указано</i>\n"
 
             # Build keyboard based on client availability
             keyboard_buttons = []
@@ -109,13 +116,13 @@ async def callback_preview_report(callback: CallbackQuery):
             ])
 
             await callback.message.edit_text(
-                f"👁️ **Предпросмотр отчёта**\n\n"
-                f"**Задача:** #{task_report.plane_sequence_id}\n"
-                f"**Клиент:** {'✅ Есть' if has_client else '⚠️ Нет привязки'}\n\n"
+                f"👁️ <b>Предпросмотр отчёта</b>\n\n"
+                f"<b>Задача:</b> #{task_report.plane_sequence_id}\n"
+                f"<b>Клиент:</b> {'✅ Есть' if has_client else '⚠️ Нет привязки'}\n\n"
                 f"{metadata_text}\n"
-                f"**ОТЧЁТ ДЛЯ КЛИЕНТА:**\n{preview}\n\n"
-                f"_Клиенту будет отправлен ТОЛЬКО текст отчёта (без метаданных)_",
-                parse_mode="Markdown",
+                f"<b>ОТЧЁТ ДЛЯ КЛИЕНТА:</b>\n{preview}\n\n"
+                f"<i>Клиенту будет отправлен ТОЛЬКО текст отчёта (без метаданных)</i>",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
             )
 

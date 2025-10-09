@@ -101,7 +101,6 @@ async def callback_work_type(callback: CallbackQuery, state: FSMContext):
                 f"✅ Тип работы: **{work_type_display}**\n\n"
                 f"🏢 **Выберите компанию**\n\n"
                 f"{'_Первой показана компания из Plane_' if plane_company else ''}",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
 
