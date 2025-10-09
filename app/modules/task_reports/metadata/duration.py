@@ -301,7 +301,7 @@ async def handle_custom_duration(message: Message, state: FSMContext):
                 'answer': lambda text='', show_alert=False: None  # Dummy answer
             })()
 
-            await callback_preview_report(fake_callback, state)
+            await callback_preview_report(fake_callback)
             return
         else:
             # Continue to next step (work type selection)
