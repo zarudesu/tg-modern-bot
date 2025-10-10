@@ -197,7 +197,7 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_text(
                 "📝 <b>Редактирование текста отчёта</b>\n\n"
                 "Отправьте новый текст отчёта:",
-                
+                parse_mode="HTML"
             )
 
         elif field_name == "duration":
