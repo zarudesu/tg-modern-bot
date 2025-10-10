@@ -3,7 +3,7 @@
 """
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
