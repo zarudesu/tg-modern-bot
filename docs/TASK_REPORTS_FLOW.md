@@ -492,6 +492,73 @@ Added complete integration:
 
 **Result:** Now `approve_send` works IDENTICALLY to "создать запись" flow from main menu.
 
+### BUG #6: Empty Report Generation for Tasks Without Comments
+
+**Date:** 2025-10-10
+**Problem:**
+Tasks without comments resulted in empty `report_text` even when task had a title and description.
+
+**Root Cause:**
+```python
+# app/services/task_reports_service.py:654
+if len(report_lines) <= 2:  # Only header + title
+    return ""  # No meaningful content
+```
+
+When task has:
+- Header (always) = 1 line
+- Title (exists) = 1 line
+- Description (<10 chars or empty) = 0 lines
+- Comments (none) = 0 lines
+
+Total = 2 lines, condition `2 <= 2` returned empty string.
+
+**Fix:** `app/services/task_reports_service.py:656`
+```python
+# Only reject if we have ONLY header (no title) or empty
+# Header + title is still meaningful (shows task completion)
+if len(report_lines) <= 1:
+    bot_logger.warning(
+        f"⚠️ Report has only {len(report_lines)} lines (header only), "
+        f"returning empty. Lines: {report_lines}"
+    )
+    return ""  # No meaningful content
+```
+
+**Result:** Tasks with title (even without comments or description) now generate valid reports.
+
+### BUG #7: Markdown Parse Error When Editing Report Text
+
+**Date:** 2025-10-10
+**Problem:**
+When editing report text field, Telegram returned error:
+```
+Bad Request: can't parse entities: Character '>' is reserved and must be escaped with the preceding '\'
+```
+
+**Root Cause:**
+```python
+# app/modules/task_reports/metadata/navigation.py:197-201
+await callback.message.edit_text(
+    "📝 <b>Редактирование текста отчёта</b>\n\n"
+    "Отправьте новый текст отчёта:",
+    # ← MISSING parse_mode="HTML"
+)
+```
+
+Without `parse_mode`, Telegram interprets `<b>` tags as Markdown V2, where `<` and `>` require escaping.
+
+**Fix:** `app/modules/task_reports/metadata/navigation.py:200`
+```python
+await callback.message.edit_text(
+    "📝 <b>Редактирование текста отчёта</b>\n\n"
+    "Отправьте новый текст отчёта:",
+    parse_mode="HTML"  # ✅ Added
+)
+```
+
+**Result:** Text editing now works without parse errors. Consistent with other metadata fields (duration, work_type, company, workers all have `parse_mode="HTML"`).
+
 ---
 
 ## Performance Optimizations

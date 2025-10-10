@@ -171,8 +171,19 @@ Client receives + Google Sheets + Group notification
 
 **Recent Fixes:**
 - BUG #5 (2025-10-08): `approve_send` now creates work_journal + Google Sheets sync
+- BUG #6 (2025-10-10): Empty report generation for tasks without comments (fixed `<= 2` to `<= 1`)
+- BUG #7 (2025-10-10): Markdown parse error when editing report text (added `parse_mode="HTML"`)
 
-**📚 Full Documentation:** [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md)
+**Performance Optimizations** (2025-10-09):
+- Removed duplicate Plane API calls in webhook (13s → 1s)
+- Workspace members fetch optimized (26 API calls → 1 call)
+
+**Code Quality** (2025-10-10):
+- Code review completed - see `docs/CODE_REVIEW_FINDINGS.md`
+- Technical debt score: 6/10 (manageable)
+- Recommended refactorings: Phase 1 (Critical) + Phase 2 (Medium)
+
+**📚 Full Documentation:** [`docs/TASK_REPORTS_FLOW.md`](docs/TASK_REPORTS_FLOW.md)
 
 ---
 
