@@ -263,14 +263,14 @@ class DailyTasksService:
     async def send_daily_tasks_to_admin(self, admin_id: int, force: bool = False) -> bool:
         """Отправить ежедневный список задач одному админу"""
         try:
-            admin_settings = self.get_admin_settings(admin_id)
-            
+            admin_settings = await self.get_admin_settings(admin_id)
+
             if not admin_settings.get('enabled', False) and not force:
                 bot_logger.debug(f"Daily tasks disabled for admin {admin_id}")
                 return False
-            
-            # Получаем задачи админа из Plane
-            tasks = await plane_api.get_all_assigned_tasks_by_user_id(admin_id)
+
+            # Получаем задачи админа из Plane по email
+            tasks = await self.get_admin_tasks(admin_id)
             
             if not tasks and not force:
                 bot_logger.info(f"No tasks found for admin {admin_id}")
@@ -437,8 +437,9 @@ class DailyTasksService:
     async def get_admin_stats(self, admin_id: int) -> Dict[str, Any]:
         """Получить статистику задач админа"""
         try:
-            tasks = await plane_api.get_all_assigned_tasks_by_user_id(admin_id)
-            
+            # Get tasks by email using existing method
+            tasks = await self.get_admin_tasks(admin_id)
+
             overdue = [t for t in tasks if t.is_overdue]
             today = [t for t in tasks if t.is_due_today and not t.is_overdue]
             upcoming = [t for t in tasks if not t.is_overdue and not t.is_due_today]

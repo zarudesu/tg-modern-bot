@@ -33,23 +33,59 @@ async def callback_my_tasks(callback: CallbackQuery):
     await callback.message.edit_text("🔄 Загружаю ваши задачи\\.\\.\\.", parse_mode="MarkdownV2")
 
     try:
-        tasks = await plane_api.get_all_assigned_tasks_by_user_id(admin_id)
+        # Get admin email from settings
+        from ...services.daily_tasks_service import daily_tasks_service
 
-        if not tasks:
+        if not daily_tasks_service:
+            await callback.message.edit_text(
+                "❌ Сервис задач не инициализирован",
+                parse_mode="MarkdownV2"
+            )
+            await callback.answer()
+            return
+
+        # Load settings from DB
+        await daily_tasks_service._load_admin_settings_from_db()
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        admin_email = admin_settings.get('plane_email')
+
+        if not admin_email:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📧 Настроить Email", callback_data="setup_email")],
                 [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
             ])
 
             await callback.message.edit_text(
-                "📭 У вас нет назначенных задач\n\n"
-                "💡 Возможные причины:\n"
-                "• Email не настроен в профиле\n"
-                "• Нет задач назначенных на ваш email\n"
-                "• Все задачи уже выполнены",
+                "📧 *Email не настроен*\n\n"
+                "Для получения задач из Plane нужно настроить ваш email\\.",
                 reply_markup=keyboard,
                 parse_mode="MarkdownV2"
             )
+            await callback.answer()
+            return
+
+        # Get tasks by email
+        bot_logger.info(f"🔄 Fetching tasks for user {admin_id} with email {admin_email}")
+        tasks = await plane_api.get_user_tasks(admin_email)
+        bot_logger.info(f"✅ Retrieved {len(tasks)} tasks for {admin_email}")
+
+        if not tasks:
+            admin_email_escaped = escape_markdown_v2(admin_email)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_tasks")],
+                [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
+            ])
+
+            await callback.message.edit_text(
+                f"📭 *У вас нет назначенных задач*\n\n"
+                f"👤 Email: {admin_email_escaped}\n\n"
+                f"💡 Возможные причины:\n"
+                f"• Нет задач назначенных на ваш email\n"
+                f"• Все задачи уже выполнены",
+                reply_markup=keyboard,
+                parse_mode="MarkdownV2"
+            )
+            await callback.answer()
             return
 
         if len(tasks) > 10:
@@ -58,7 +94,7 @@ async def callback_my_tasks(callback: CallbackQuery):
             await show_my_tasks_list(callback, tasks)
 
     except Exception as e:
-        bot_logger.error(f"Error in my_tasks callback: {e}")
+        bot_logger.error(f"Error in my_tasks callback: {e}", exc_info=True)
         await callback.message.edit_text(
             "❌ Ошибка загрузки ваших задач",
             parse_mode="MarkdownV2"
@@ -165,19 +201,52 @@ async def callback_my_tasks_list(callback: CallbackQuery):
     await callback.message.edit_text("🔄 Загружаю ваши задачи\\.\\.\\.", parse_mode="MarkdownV2")
 
     try:
-        tasks = await plane_api.get_all_assigned_tasks_by_user_id(admin_id)
+        # Get admin email from settings
+        from ...services.daily_tasks_service import daily_tasks_service
+
+        if not daily_tasks_service:
+            await callback.message.edit_text(
+                "❌ Сервис задач не инициализирован",
+                parse_mode="MarkdownV2"
+            )
+            await callback.answer()
+            return
+
+        # Load settings from DB
+        await daily_tasks_service._load_admin_settings_from_db()
+        admin_settings = daily_tasks_service.admin_settings.get(admin_id, {})
+        admin_email = admin_settings.get('plane_email')
+
+        if not admin_email:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📧 Настроить Email", callback_data="setup_email")],
+                [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
+            ])
+
+            await callback.message.edit_text(
+                "📧 *Email не настроен*\n\n"
+                "Для получения задач из Plane нужно настроить ваш email\\.",
+                reply_markup=keyboard,
+                parse_mode="MarkdownV2"
+            )
+            await callback.answer()
+            return
+
+        # Get tasks by email
+        tasks = await plane_api.get_user_tasks(admin_email)
 
         if not tasks:
             await callback.message.edit_text(
                 "📭 У вас нет назначенных задач",
                 parse_mode="MarkdownV2"
             )
+            await callback.answer()
             return
 
         await show_my_tasks_list(callback, tasks)
 
     except Exception as e:
-        bot_logger.error(f"Error in my_tasks_list callback: {e}")
+        bot_logger.error(f"Error in my_tasks_list callback: {e}", exc_info=True)
         await callback.message.edit_text(
             "❌ Ошибка загрузки списка задач",
             parse_mode="MarkdownV2"
