@@ -106,12 +106,20 @@ async def cmd_daily_tasks(message: Message):
         tasks_text += f"📁 *Проектов:* {len(tasks_by_project)}\n\n"
 
         task_counter = 1
+        MAX_TASKS_TO_SHOW = 20  # Telegram message limit: show only first 20 tasks
+
         for project_name, project_tasks in tasks_by_project.items():
+            if task_counter > MAX_TASKS_TO_SHOW:
+                break
+
             project_name_escaped = escape_markdown_v2(project_name)
             tasks_text += f"📁 *{project_name_escaped}* \\({len(project_tasks)} задач\\)\n"
 
-            # Показываем ВСЕ задачи (убран лимит [:5])
+            # Show tasks from this project (up to limit)
             for task in project_tasks:
+                if task_counter > MAX_TASKS_TO_SHOW:
+                    break
+
                 state_emoji = task.state_emoji
                 priority_emoji = task.priority_emoji
                 task_name = escape_markdown_v2(task.name)
@@ -124,6 +132,11 @@ async def cmd_daily_tasks(message: Message):
                 task_counter += 1
 
             tasks_text += "\n"
+
+        # Add "showing N of total" message if truncated
+        if len(tasks) > MAX_TASKS_TO_SHOW:
+            tasks_text += f"_\\.\\.\\. показано {MAX_TASKS_TO_SHOW} из {len(tasks)} задач_\n"
+            tasks_text += f"_Используйте кнопку \"📁 По проектам\" для навигации_\n"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📁 По проектам", callback_data="all_projects")],
