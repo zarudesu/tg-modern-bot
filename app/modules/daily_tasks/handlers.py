@@ -16,10 +16,104 @@ from ...config import settings
 
 router = Router()
 
+# Global cache for pagination (email -> tasks list)
+_tasks_cache = {}
+TASKS_PER_PAGE = 15
+
 
 def is_admin(user_id: int) -> bool:
     """Проверка является ли пользователь админом"""
     return user_id in settings.admin_user_id_list
+
+
+async def _show_tasks_page(message, tasks: list, admin_email: str, page: int = 1):
+    """Show tasks with pagination"""
+    from aiogram.types import LinkPreviewOptions
+
+    # Cache tasks for pagination
+    _tasks_cache[admin_email] = tasks
+
+    total_tasks = len(tasks)
+    total_pages = (total_tasks + TASKS_PER_PAGE - 1) // TASKS_PER_PAGE
+
+    # Validate page number
+    if page < 1:
+        page = 1
+    if page > total_pages:
+        page = total_pages
+
+    # Calculate slice
+    start_idx = (page - 1) * TASKS_PER_PAGE
+    end_idx = start_idx + TASKS_PER_PAGE
+    page_tasks = tasks[start_idx:end_idx]
+
+    # Format message
+    admin_email_escaped = escape_markdown_v2(admin_email)
+
+    # Group tasks by project
+    tasks_by_project = {}
+    for task in page_tasks:
+        project_name = task.project_name
+        if project_name not in tasks_by_project:
+            tasks_by_project[project_name] = []
+        tasks_by_project[project_name].append(task)
+
+    tasks_text = f"📋 *Задачи из Plane* \\(страница {page}/{total_pages}\\)\n\n"
+    tasks_text += f"👤 *Email:* {admin_email_escaped}\n"
+    tasks_text += f"📊 *Всего задач:* {total_tasks}\n"
+    tasks_text += f"📄 *На странице:* {len(page_tasks)}\n\n"
+
+    task_counter = start_idx + 1
+    for project_name, project_tasks in tasks_by_project.items():
+        project_name_escaped = escape_markdown_v2(project_name)
+        tasks_text += f"📁 *{project_name_escaped}* \\({len(project_tasks)}\\)\n"
+
+        for task in project_tasks:
+            state_emoji = task.state_emoji
+            priority_emoji = task.priority_emoji
+            task_name = escape_markdown_v2(task.name)
+            task_url = task.task_url
+            status_text = escape_markdown_v2(task.state_name or 'Неизвестно')
+
+            tasks_text += f"  {task_counter}\\. {state_emoji} {priority_emoji} [{task_name}]({task_url})\n"
+            tasks_text += f"     🏷️ {status_text}\n"
+            task_counter += 1
+
+        tasks_text += "\n"
+
+    # Build pagination keyboard
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data=f"tasks_page:{admin_email}:{page-1}"
+        ))
+
+    nav_buttons.append(InlineKeyboardButton(
+        text=f"📄 {page}/{total_pages}",
+        callback_data="noop"
+    ))
+
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(
+            text="Вперёд ➡️",
+            callback_data=f"tasks_page:{admin_email}:{page+1}"
+        ))
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        nav_buttons,
+        [InlineKeyboardButton(text="📁 По проектам", callback_data="all_projects")],
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="back_to_settings"),
+         InlineKeyboardButton(text="🔄 Обновить", callback_data="daily_tasks")],
+        [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
+    ])
+
+    await message.edit_text(
+        tasks_text,
+        reply_markup=keyboard,
+        parse_mode="MarkdownV2",
+        link_preview_options=LinkPreviewOptions(is_disabled=True)
+    )
 
 
 @router.message(Command("daily_tasks"))
@@ -89,71 +183,8 @@ async def cmd_daily_tasks(message: Message):
             )
             return
 
-        # 🚀 Формируем красивый список задач С ГРУППИРОВКОЙ ПО ПРОЕКТАМ
-        admin_email_escaped = escape_markdown_v2(admin_email)
-
-        # Группируем задачи по проектам
-        tasks_by_project = {}
-        for task in tasks:
-            project_name = task.project_name
-            if project_name not in tasks_by_project:
-                tasks_by_project[project_name] = []
-            tasks_by_project[project_name].append(task)
-
-        tasks_text = "📋 *Все задачи из Plane*\n\n"
-        tasks_text += f"👤 *Email:* {admin_email_escaped}\n"
-        tasks_text += f"📊 *Всего задач:* {len(tasks)}\n"
-        tasks_text += f"📁 *Проектов:* {len(tasks_by_project)}\n\n"
-
-        task_counter = 1
-        MAX_TASKS_TO_SHOW = 20  # Telegram message limit: show only first 20 tasks
-
-        for project_name, project_tasks in tasks_by_project.items():
-            if task_counter > MAX_TASKS_TO_SHOW:
-                break
-
-            project_name_escaped = escape_markdown_v2(project_name)
-            tasks_text += f"📁 *{project_name_escaped}* \\({len(project_tasks)} задач\\)\n"
-
-            # Show tasks from this project (up to limit)
-            for task in project_tasks:
-                if task_counter > MAX_TASKS_TO_SHOW:
-                    break
-
-                state_emoji = task.state_emoji
-                priority_emoji = task.priority_emoji
-                task_name = escape_markdown_v2(task.name)
-                task_url = task.task_url
-                status_text = escape_markdown_v2(task.state_name or 'Неизвестно')
-                project_escaped = escape_markdown_v2(task.project_name)
-
-                tasks_text += f"  {task_counter}\\. {state_emoji} {priority_emoji} [{task_name}]({task_url})\n"
-                tasks_text += f"     📁 {project_escaped} \\| 🏷️ {status_text}\n"
-                task_counter += 1
-
-            tasks_text += "\n"
-
-        # Add "showing N of total" message if truncated
-        if len(tasks) > MAX_TASKS_TO_SHOW:
-            tasks_text += f"_\\.\\.\\. показано {MAX_TASKS_TO_SHOW} из {len(tasks)} задач_\n"
-            tasks_text += f"_Используйте кнопку \"📁 По проектам\" для навигации_\n"
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📁 По проектам", callback_data="all_projects")],
-            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="back_to_settings"),
-             InlineKeyboardButton(text="🔄 Обновить", callback_data="daily_tasks")],
-            [InlineKeyboardButton(text="🏠 В главное меню", callback_data="start_menu")]
-        ])
-
-        # Отключаем предпросмотр ссылок
-        from aiogram.types import LinkPreviewOptions
-
-        await loading_msg.edit_text(
-            tasks_text,
-            reply_markup=keyboard,
-            parse_mode="MarkdownV2",
-            link_preview_options=LinkPreviewOptions(is_disabled=True)
-        )
+        # 🚀 Формируем красивый список задач С ПАГИНАЦИЕЙ
+        await _show_tasks_page(loading_msg, tasks, admin_email, page=1)
 
     except Exception as e:
         bot_logger.error(f"Error in daily_tasks command: {e}")
@@ -278,7 +309,7 @@ async def cmd_plane_test(message: Message):
 async def cmd_scheduler_status(message: Message):
     """Статус планировщика"""
     admin_count = len(settings.admin_user_id_list)
-    
+
     await message.reply(
         f"📊 *Статус системы ежедневных задач*\n\n"
         f"🤖 *Планировщик:* готов к работе\n"
@@ -288,3 +319,35 @@ async def cmd_scheduler_status(message: Message):
         f"🎯 *Система готова к работе\\!*",
         parse_mode="MarkdownV2"
     )
+
+
+@router.callback_query(F.data.startswith("tasks_page:"))
+async def callback_tasks_page_navigation(callback: CallbackQuery):
+    """Handle pagination navigation"""
+    try:
+        # Parse callback data: tasks_page:email:page
+        parts = callback.data.split(":", 2)
+        if len(parts) != 3:
+            await callback.answer("❌ Неверный формат данных", show_alert=True)
+            return
+
+        admin_email = parts[1]
+        page = int(parts[2])
+
+        # Get cached tasks
+        if admin_email not in _tasks_cache:
+            await callback.answer("⚠️ Кэш задач истек, обновите список", show_alert=True)
+            return
+
+        tasks = _tasks_cache[admin_email]
+
+        # Show requested page
+        await _show_tasks_page(callback.message, tasks, admin_email, page=page)
+        await callback.answer()
+
+    except ValueError as e:
+        bot_logger.error(f"Invalid page number in pagination: {e}")
+        await callback.answer("❌ Неверный номер страницы", show_alert=True)
+    except Exception as e:
+        bot_logger.error(f"Error in pagination callback: {e}")
+        await callback.answer("❌ Ошибка навигации", show_alert=True)
