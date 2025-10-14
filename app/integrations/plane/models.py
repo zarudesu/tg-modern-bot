@@ -25,6 +25,7 @@ class PlaneProject(BaseModel):
 
     id: str
     name: str
+    identifier: Optional[str] = None  # Project prefix (HARZL, HHIVP, etc.)
     description: Optional[str] = None
     workspace: str
     created_at: Optional[str] = None

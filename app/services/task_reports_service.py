@@ -316,21 +316,31 @@ class TaskReportsService:
                 project_detail = issue_details.get('project_detail') or {}
                 project_name = project_detail.get('name') or issue_details.get('project_name')
 
-                # If no project_name in issue_details, fetch from Plane projects API
-                if not project_name and task_report.plane_project_id:
+                # Get project identifier (HARZL, HHIVP, etc.) from project_detail
+                project_identifier = project_detail.get('identifier') or issue_details.get('project_identifier')
+
+                # If no project info in issue_details, fetch from Plane projects API
+                if (not project_name or not project_identifier) and task_report.plane_project_id:
                     try:
-                        bot_logger.info(f"📥 Fetching project name for {task_report.plane_project_id[:8]}")
+                        bot_logger.info(f"📥 Fetching project details for {task_report.plane_project_id[:8]}")
                         projects = await plane_api.get_all_projects()
                         for proj in projects:
                             # projects is list of dicts, not objects
                             proj_id = proj.get('id') if isinstance(proj, dict) else proj.id
                             proj_name = proj.get('name') if isinstance(proj, dict) else proj.name
+                            proj_identifier = proj.get('identifier') if isinstance(proj, dict) else getattr(proj, 'identifier', None)
                             if proj_id == task_report.plane_project_id:
                                 project_name = proj_name
-                                bot_logger.info(f"✅ Found project name: {project_name}")
+                                project_identifier = proj_identifier
+                                bot_logger.info(f"✅ Found project: {project_name} ({project_identifier})")
                                 break
                     except Exception as e:
-                        bot_logger.warning(f"⚠️ Failed to fetch project name: {e}")
+                        bot_logger.warning(f"⚠️ Failed to fetch project details: {e}")
+
+                # Save project_identifier to TaskReport
+                if project_identifier and not task_report.project_identifier:
+                    task_report.project_identifier = project_identifier
+                    bot_logger.info(f"🏷️ Saved project_identifier: {project_identifier}")
 
                 if project_name and not task_report.company:
                     # Map company name using COMPANY_MAPPING
@@ -462,7 +472,8 @@ class TaskReportsService:
                 title=task_report.task_title,
                 description=task_report.task_description,
                 comments=comments,
-                sequence_id=task_report.plane_sequence_id
+                sequence_id=task_report.plane_sequence_id,
+                project_identifier=task_report.project_identifier
             )
 
             bot_logger.info(f"🔨 Generated report_text length: {len(report_text) if report_text else 0}")
@@ -492,7 +503,8 @@ class TaskReportsService:
         title: Optional[str],
         description: Optional[str],
         comments: List[Dict],
-        sequence_id: Optional[int]
+        sequence_id: Optional[int],
+        project_identifier: Optional[str] = None
     ) -> str:
         """
         Generate user-friendly report text from Plane data
@@ -501,7 +513,8 @@ class TaskReportsService:
             title: Task title
             description: Task description
             comments: List of comment objects
-            sequence_id: HHIVP-123 number
+            sequence_id: Task sequence number (82, 123, etc.)
+            project_identifier: Project prefix (HARZL, HHIVP, etc.)
 
         Returns:
             Formatted report text
@@ -510,7 +523,9 @@ class TaskReportsService:
 
         # Header (no markdown - will be displayed in HTML mode)
         if sequence_id:
-            report_lines.append(f"📋 Отчёт по задаче HHIVP-{sequence_id}\n")
+            # Use project_identifier if available, otherwise fallback to HHIVP
+            prefix = project_identifier or "HHIVP"
+            report_lines.append(f"📋 Отчёт по задаче {prefix}-{sequence_id}\n")
         else:
             report_lines.append(f"📋 Отчёт по выполненной задаче\n")
 

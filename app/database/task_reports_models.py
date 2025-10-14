@@ -61,6 +61,12 @@ class TaskReport(Base):
         comment="UUID проекта в Plane"
     )
 
+    project_identifier = Column(
+        String(20),
+        nullable=True,
+        comment="Префикс проекта (HARZL, HHIVP, и т.д.)"
+    )
+
     task_title = Column(
         String(500),
         nullable=True,

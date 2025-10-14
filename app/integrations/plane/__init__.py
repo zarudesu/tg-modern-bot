@@ -168,6 +168,7 @@ class PlaneAPI:
                     {
                         'id': p.id,
                         'name': p.name,
+                        'identifier': p.identifier,  # Add identifier (HARZL, HHIVP, etc.)
                         'description': p.description,
                         'workspace': p.workspace,
                         'created_at': p.created_at,
