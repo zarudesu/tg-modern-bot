@@ -63,7 +63,23 @@ class TaskReportsService:
             "telegram_username": "dima_gusev",
             "telegram_id": 132228544
         },
+        "D. Gusev": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+        "Дмитрий": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+        "Дмитрий Гусев": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
         "gen.director@hhivp.com": {
+            "telegram_username": "dima_gusev",
+            "telegram_id": 132228544
+        },
+        "gusev@hhivp.com": {
             "telegram_username": "dima_gusev",
             "telegram_id": 132228544
         },

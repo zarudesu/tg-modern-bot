@@ -366,21 +366,33 @@ class WorkJournalService:
             return False, "error"
     
     async def get_workers(self, active_only: bool = True) -> List[str]:
-        """Получить список исполнителей"""
+        """Получить список исполнителей (только имена для обратной совместимости)"""
         query = select(WorkJournalWorker.name).order_by(WorkJournalWorker.display_order)
-        
+
         if active_only:
             query = query.where(WorkJournalWorker.is_active == True)
-        
+
         result = await self.session.execute(query)
         workers = result.scalars().all()
-        
+
         # Если исполнители не настроены, возвращаем дефолтный список
         if not workers:
             return DEFAULT_WORKERS.copy()
-        
+
         return list(workers)
-    
+
+    async def get_workers_full(self, active_only: bool = True) -> List[WorkJournalWorker]:
+        """Получить полные объекты исполнителей с telegram_username"""
+        query = select(WorkJournalWorker).order_by(WorkJournalWorker.display_order)
+
+        if active_only:
+            query = query.where(WorkJournalWorker.is_active == True)
+
+        result = await self.session.execute(query)
+        workers = result.scalars().all()
+
+        return list(workers)
+
     async def add_worker(self, name: str) -> bool:
         """Добавить нового исполнителя"""
         try:
