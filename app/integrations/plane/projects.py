@@ -36,6 +36,7 @@ class PlaneProjectsManager:
                     project = PlaneProject(
                         id=project_data.get('id', ''),
                         name=project_data.get('name', 'Unknown'),
+                        identifier=project_data.get('identifier'),  # HARZL, HHIVP, etc.
                         description=project_data.get('description'),
                         workspace=project_data.get('workspace', ''),
                         created_at=project_data.get('created_at'),
