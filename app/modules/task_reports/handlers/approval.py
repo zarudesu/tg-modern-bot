@@ -545,6 +545,168 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
 
 
 # ═══════════════════════════════════════════════════════════
+# CALLBACK: SEND TO GROUP (new feature)
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("send_to_group:"))
+async def callback_send_to_group(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Send completed report to work journal group chat
+
+    Sends full report text to group + creates work_journal entry + Google Sheets sync
+    """
+    try:
+        try:
+            task_report_id = parse_report_id_safely(callback.data)
+        except ValueError as e:
+            bot_logger.error(f"Invalid report_id in callback: {e}")
+            await callback.answer("❌ Неверный ID отчёта", show_alert=True)
+            return
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await callback.answer("❌ Отчёт не найден", show_alert=True)
+                return
+
+            if not task_report.report_text:
+                await callback.answer("❌ Отчёт не заполнен", show_alert=True)
+                return
+
+            # Check if group chat ID is configured
+            group_chat_id = settings.work_journal_group_chat_id
+
+            if not group_chat_id:
+                await callback.answer("❌ Group chat ID не настроен в конфиге", show_alert=True)
+                return
+
+            # Build report message for group
+            task_title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            company_escaped = (task_report.company or "Не указана").replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            report_text_escaped = task_report.report_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            duration_escaped = (task_report.work_duration or "Не указано").replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+            # Parse workers
+            workers_list = []
+            if task_report.workers:
+                try:
+                    workers_list = json.loads(task_report.workers)
+                except Exception as e:
+                    bot_logger.warning(f"Failed to parse workers JSON: {e}")
+
+            # Map to mentions for group
+            workers_text = ""
+            if workers_list:
+                from ..utils import map_workers_to_mentions
+                workers_text = map_workers_to_mentions(workers_list)
+            else:
+                workers_text = "Не указаны"
+
+            group_message = (
+                f"📋 <b>Отчёт о выполнении задачи</b>\n\n"
+                f"🎯 <b>Задача:</b> {task_title_escaped}\n"
+                f"🏢 <b>Компания:</b> {company_escaped}\n"
+                f"⏱️ <b>Время:</b> {duration_escaped}\n"
+                f"👥 <b>Исполнители:</b> {workers_text}\n\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"📝 <b>Отчёт:</b>\n\n{report_text_escaped}"
+            )
+
+            # Send to group
+            try:
+                await bot.send_message(
+                    chat_id=group_chat_id,
+                    text=group_message,
+                    parse_mode="HTML"
+                )
+
+                bot_logger.info(f"✅ Sent report #{task_report_id} to group chat {group_chat_id}")
+
+            except Exception as send_error:
+                bot_logger.error(f"❌ Error sending report to group: {send_error}")
+                await callback.answer(f"❌ Ошибка отправки в группу: {send_error}", show_alert=True)
+                return
+
+            # Approve report (if not already)
+            if task_report.status != 'approved':
+                await task_reports_service.approve_report(session, task_report_id)
+
+            # Now create work_journal entry if required fields are present
+            if task_report.company and task_report.work_duration and workers_list:
+                # Map telegram usernames to display names
+                from ..utils import map_workers_to_display_names_list
+                workers_display_list = map_workers_to_display_names_list(workers_list)
+
+                # Get user info
+                from ....database.models import BotUser
+                user = await session.get(BotUser, callback.from_user.id)
+
+                if callback.from_user.username:
+                    creator_name = f"@{callback.from_user.username}"
+                    user_email = f"{callback.from_user.username}@example.com"
+                else:
+                    creator_name = callback.from_user.first_name or f"User_{callback.from_user.id}"
+                    user_email = f"user_{callback.from_user.id}@telegram.bot"
+
+                # Create work journal entry
+                wj_service = work_journal_service.WorkJournalService(session)
+                work_date = task_report.closed_at.date() if task_report.closed_at else datetime.now().date()
+
+                entry = await wj_service.create_work_entry(
+                    telegram_user_id=callback.from_user.id,
+                    user_email=user_email,
+                    work_date=work_date,
+                    company=task_report.company,
+                    work_duration=task_report.work_duration,
+                    work_description=task_report.report_text or "",
+                    is_travel=task_report.is_travel or False,
+                    worker_names=workers_display_list,
+                    created_by_user_id=callback.from_user.id,
+                    created_by_name=creator_name
+                )
+
+                # Link to task report
+                task_report.work_journal_entry_id = entry.id
+                await session.commit()
+
+                bot_logger.info(f"✅ Created work_journal entry #{entry.id} linked to task report #{task_report_id}")
+
+                # Send to n8n (Google Sheets)
+                try:
+                    from ....services.n8n_integration_service import N8nIntegrationService
+
+                    user_data = {
+                        "first_name": user.first_name if user else callback.from_user.first_name,
+                        "username": user.username if user else callback.from_user.username
+                    }
+
+                    n8n_service = N8nIntegrationService()
+                    success = await n8n_service.send_with_retry(entry, user_data, session)
+                    if success:
+                        bot_logger.info(f"✅ Successfully sent entry {entry.id} to n8n (Google Sheets)")
+                except Exception as e:
+                    bot_logger.error(f"Error sending to n8n for entry {entry.id}: {e}")
+
+            # Clear FSM state
+            await state.clear()
+
+            # Notify admin
+            await callback.message.edit_text(
+                f"✅ <b>Отчёт отправлен в группу!</b>\n\n"
+                f"💬 Сообщение опубликовано в групповом чате.\n"
+                f"📊 Work journal и Google Sheets обновлены.",
+                reply_markup=get_back_to_main_menu_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer("✅ Отправлено в группу")
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in send_to_group callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
 # CALLBACK: CLOSE WITHOUT REPORT (admin decision)
 # ═══════════════════════════════════════════════════════════
 

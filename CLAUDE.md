@@ -134,11 +134,25 @@ python3 test_email_fix.py         # Email filter tests
 
 ### Production
 ```bash
-make prod-deploy                  # Full deployment
-make prod-up                      # Start services
-make prod-logs                    # View logs
-make prod-backup                  # Backup database
+# SSH access (passwordless with key)
+ssh hhivp@rd.hhivp.com            # Connect to production server
+
+# Deployment
+cd /opt/tg-modern-bot && git pull origin main  # Pull latest code
+docker-compose -f docker-compose.prod.yml build --no-cache bot  # Rebuild
+docker-compose -f docker-compose.prod.yml up -d --force-recreate bot  # Deploy
+
+# Monitoring
+docker logs hhivp-bot-app-prod --tail 100 -f  # View logs
+docker ps --filter name=hhivp-bot  # Check containers
+curl http://localhost:8083/health  # Webhook health (bot runs on 8083)
 ```
+
+**Production Notes:**
+- Bot webhook runs on **port 8083** (exposed from container's 8080)
+- n8n workflows send webhooks to `http://rd.hhivp.com:8083/webhooks/task-completed`
+- PostgreSQL container: `e30e3f83b282_hhivp-bot-postgres-prod`
+- Database queries: `docker exec e30e3f83b282_hhivp-bot-postgres-prod psql -U hhivp_bot -d hhivp_bot_prod -c "..."`
 
 ---
 
@@ -147,6 +161,7 @@ make prod-backup                  # Backup database
 | Module | Status | Location | Documentation |
 |--------|--------|----------|---------------|
 | **Task Reports** | ✅ PRODUCTION | `app/modules/task_reports/` | [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md) |
+| **Support Requests** | ✅ PRODUCTION | `app/modules/chat_support/` | [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md) |
 | **Daily Tasks** | ✅ PRODUCTION | `app/modules/daily_tasks/` | Email → Plane.so automation |
 | **Work Journal** | ✅ PRODUCTION | `app/modules/work_journal/` | Work entries → Google Sheets |
 | **AI Assistant** | 🚧 BETA | `app/modules/ai_assistant/` | OpenAI/Anthropic integration |
@@ -173,6 +188,40 @@ Client receives + Google Sheets + Group notification
 - BUG #5 (2025-10-08): `approve_send` now creates work_journal + Google Sheets sync
 
 **📚 Full Documentation:** [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md)
+
+---
+
+### Support Requests Module (PRODUCTION READY)
+
+**Purpose:** Allow users to create support requests from group chats → auto-creates tasks in Plane.so
+
+**Quick Flow:**
+```
+User runs /request in group → Types problem description →
+Bot creates Plane task + notifies admins → User gets ticket number
+```
+
+**Key Features:**
+- ✅ Simple user flow: `/request` → type problem → done
+- ✅ Auto-creates tasks in Plane with full user context
+- ✅ Maps group chats to specific Plane projects
+- ✅ Notifies admins about new requests
+- ✅ FSM-based state management (no message conflicts)
+
+**Setup Required:**
+- Admin runs `/setup_chat` in group to map to Plane project
+- Users can then create requests with `/request`
+
+**Current Status:**
+- ✅ Module loaded and active (main.py:273-275)
+- ⚠️ No chat mappings configured yet (run `/setup_chat` first)
+
+**Admin Commands:**
+- `/setup_chat` - Configure group for support requests
+- `/list_chats` - List all configured groups
+- `/remove_chat` - Remove group configuration
+
+**📚 Full Documentation:** [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md)
 
 ---
 
@@ -559,13 +608,22 @@ git check-ignore .env SECRETS.md
 
 ### Production Services
 
+**Production Server**:
+- Host: `rd.hhivp.com`
+- SSH: `ssh hhivp@rd.hhivp.com` (passwordless with RSA key)
+- Bot path: `/opt/tg-modern-bot`
+- Webhook port: **8083** (external) → 8080 (internal)
+- SSH key: `~/.ssh/id_rsa` (4096-bit RSA, created 2025-10-22)
+
 **n8n** (Automation & Google Sheets integration):
 - URL: https://n8n.hhivp.com
 - Credentials in `SECRETS.md`
+- Sends webhooks to: `http://rd.hhivp.com:8083/webhooks/task-completed`
 
 **Plane.so** (Task Management):
 - URL: https://plane.hhivp.com
 - API token in `SECRETS.md`
+- Projects: HHIVP, HARZL, DELTA, и др.
 
 **Telegram Group**:
 - Work Journal notifications: -1001682373643

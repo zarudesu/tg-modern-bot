@@ -29,7 +29,8 @@ EMOJI = {
     'back': '◀️',
     'cancel': '❌',
     'check': '✅',
-    'edit': '✏️'
+    'edit': '✏️',
+    'group': '💬'
 }
 
 
@@ -251,7 +252,23 @@ def create_final_review_keyboard(task_report_id: int, has_client: bool) -> Inlin
             )
         )
 
-    # Кнопка "Закрыть без отправки"
+    # Кнопка "Отправить в группу" (ВСЕГДА доступна)
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{EMOJI['group']} Отправить в группу",
+            callback_data=f"send_to_group:{task_report_id}"
+        )
+    )
+
+    # Кнопка "Продолжить без отправки" (вместо "Закрыть без отчёта")
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{EMOJI['check']} Продолжить без отправки",
+            callback_data=f"approve_only:{task_report_id}"
+        )
+    )
+
+    # Кнопка "Закрыть без отчёта"
     builder.row(
         InlineKeyboardButton(
             text=f"{EMOJI['cancel']} Закрыть без отчёта",

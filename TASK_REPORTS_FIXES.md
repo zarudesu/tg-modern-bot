@@ -1,5 +1,114 @@
 # Task Reports - Все исправления
 
+## 🆕 Последние исправления (2025-10-22)
+
+### 7. ✅ project_identifier всегда NULL для всех проектов
+
+**Проблема**: Все task_reports имели `project_identifier = NULL`, из-за чего отчеты показывали "HHIVP-123" вместо "HARZL-94", "DELTA-30" и т.д.
+
+**Корневая причина**: `PlaneProjectsManager.get_projects()` не извлекал поле `identifier` из Plane API response → все PlaneProject объекты имели `identifier=None`
+
+**Файлы**:
+- `app/integrations/plane/projects.py:39` - добавлено `identifier=project_data.get('identifier')`
+
+**Исправление**:
+```python
+project = PlaneProject(
+    id=project_data.get('id', ''),
+    name=project_data.get('name', 'Unknown'),
+    identifier=project_data.get('identifier'),  # HARZL, HHIVP, DELTA, etc.
+    description=project_data.get('description'),
+    workspace=project_data.get('workspace', ''),
+    created_at=project_data.get('created_at'),
+    updated_at=project_data.get('updated_at')
+)
+```
+
+**Результат**: Теперь для НОВЫХ отчетов автоматически заполняется правильный project_identifier
+
+**Commit**: `980cc4d` - "🐛 Fix: Add missing identifier field when fetching Plane projects"
+
+---
+
+### 8. ✅ Миграция 006 не была идемпотентной
+
+**Проблема**: Миграция `006_add_project_identifier` использовала `op.add_column()`, что вызывало ошибку при повторном запуске (например, при пересборке Docker)
+
+**Корневая причина**:
+- Код был запущен на проде неделю назад
+- Миграция не была применена
+- Колонка была добавлена вручную
+- При пересборке миграция пыталась добавить колонку повторно → ошибка
+
+**Файлы**:
+- `alembic/versions/006_add_project_identifier_to_task_reports.py`
+
+**Исправление**:
+```python
+def upgrade():
+    # Add project_identifier column to task_reports (idempotent)
+    # Use raw SQL with IF NOT EXISTS for safety
+    from sqlalchemy import text
+    connection = op.get_bind()
+    connection.execute(text("""
+        ALTER TABLE task_reports
+        ADD COLUMN IF NOT EXISTS project_identifier VARCHAR(20);
+    """))
+
+    # Add comment if column exists
+    connection.execute(text("""
+        COMMENT ON COLUMN task_reports.project_identifier IS 'Префикс проекта (HARZL, HHIVP, и т.д.)';
+    """))
+```
+
+**Результат**: Миграция теперь безопасна для повторного запуска
+
+**Commit**: `53d7df8` - "🔧 Fix: Make migration 006 idempotent (IF NOT EXISTS)"
+
+---
+
+### 9. ✅ SSH ключ для production сервера
+
+**Проблема**: Каждое подключение к production требовало пароль `sshpass -p '...'`, что небезопасно и расходует токены
+
+**Решение**: Настроен SSH ключ для беспарольного доступа
+
+**Команды**:
+```bash
+# Создан RSA ключ 4096 бит
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -C "claude-code@tg-bot"
+
+# Добавлен на production сервер
+ssh-copy-id -i ~/.ssh/id_rsa.pub hhivp@rd.hhivp.com
+```
+
+**Результат**: Теперь можно подключаться без пароля: `ssh hhivp@rd.hhivp.com`
+
+---
+
+### 10. ✅ Исправлены имена исполнителей в work_journal
+
+**Проблема**: В отчетах о работе показывались неправильные имена исполнителей ("D. Gusev", "Дима" вместо "dima_gusev", "Тимофей" вместо "timofey_batyrev")
+
+**Корневая причина**:
+- Таблица `work_journal_workers` была пустая → использовался DEFAULT_WORKERS hardcoded массив
+- Админ выбирал display names из UI → они сохранялись в БД
+- `map_workers_to_display_names_list()` ожидала telegram_usernames, получала display names → маппинг не работал
+
+**Исправления**:
+1. Заполнена `work_journal_workers` на проде (Костя, Дима, Тимофей с telegram_username)
+2. Добавлен "D. Gusev" и варианты в PLANE_TO_TELEGRAM_MAP (`app/services/task_reports_service.py:66-85`)
+3. Добавлен метод `get_workers_full()` в WorkJournalService
+
+**Файлы**:
+- `app/services/task_reports_service.py` - PLANE_TO_TELEGRAM_MAP
+- `app/services/work_journal_service.py` - get_workers_full()
+- Production DB - заполнена work_journal_workers
+
+**Commit**: См. коммит с фиксом имен работников
+
+---
+
 ## Список проблем из тестирования
 
 1. ❌ **Одобрить думало но не сработало** - н8н/Google Sheets не синхронизируется
@@ -9,6 +118,9 @@
 5. ❌ **Длительность в формате "2h"** - должно быть по-русски как в work_journal
 6. ❌ **Ошибка при выборе типа работы** - `invalid literal for int() with base 10: 'None'`
 7. ✅ **Главное меню не работает** - ИСПРАВЛЕНО (изменили callback_data на start_menu)
+8. ✅ **project_identifier всегда NULL** - ИСПРАВЛЕНО (2025-10-22)
+9. ✅ **Миграция не идемпотентна** - ИСПРАВЛЕНО (2025-10-22)
+10. ✅ **Имена исполнителей неправильные** - ИСПРАВЛЕНО (2025-10-22)
 
 ---
 
