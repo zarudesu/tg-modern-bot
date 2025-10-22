@@ -17,16 +17,19 @@ depends_on = None
 
 
 def upgrade():
-    # Add project_identifier column to task_reports
-    op.add_column(
-        'task_reports',
-        sa.Column(
-            'project_identifier',
-            sa.String(length=20),
-            nullable=True,
-            comment='Префикс проекта (HARZL, HHIVP, и т.д.)'
-        )
-    )
+    # Add project_identifier column to task_reports (idempotent)
+    # Use raw SQL with IF NOT EXISTS for safety
+    from sqlalchemy import text
+    connection = op.get_bind()
+    connection.execute(text("""
+        ALTER TABLE task_reports
+        ADD COLUMN IF NOT EXISTS project_identifier VARCHAR(20);
+    """))
+
+    # Add comment if column exists
+    connection.execute(text("""
+        COMMENT ON COLUMN task_reports.project_identifier IS 'Префикс проекта (HARZL, HHIVP, и т.д.)';
+    """))
 
 
 def downgrade():
