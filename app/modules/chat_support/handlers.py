@@ -55,13 +55,15 @@ async def cmd_request(message: Message, state: FSMContext):
             )
             return
 
-    # Set FSM state - PROPER aiogram 3 way
+    # Set FSM state with 10 minute timeout
     await state.set_state(SupportRequestStates.waiting_for_problem)
 
-    # Store mapping info in state data
+    # Store mapping info in state data with timestamp for timeout check
+    from datetime import datetime
     await state.update_data(
         chat_id=chat_id,
-        project_name=mapping.plane_project_name
+        project_name=mapping.plane_project_name,
+        request_started_at=datetime.now().timestamp()
     )
 
     # Send with ForceReply to auto-trigger reply
@@ -90,6 +92,23 @@ async def handle_request_text(message: Message, state: FSMContext):
     chat_id = message.chat.id
 
     bot_logger.info(f"📨 REQUEST TEXT received from user {user_id} in chat {chat_id}")
+
+    # Check timeout (10 minutes)
+    state_data = await state.get_data()
+    request_started_at = state_data.get('request_started_at')
+
+    if request_started_at:
+        from datetime import datetime
+        elapsed_minutes = (datetime.now().timestamp() - request_started_at) / 60
+        if elapsed_minutes > 10:
+            await message.reply(
+                "⏱️ Время ожидания истекло (10 минут).\n\n"
+                "Используйте /request чтобы создать новую заявку.",
+                parse_mode="Markdown"
+            )
+            await state.clear()
+            bot_logger.info(f"⏱️ Request timeout for user {user_id}, state cleared")
+            return
 
     problem_text = message.text.strip()
 
@@ -121,17 +140,9 @@ async def handle_request_text(message: Message, state: FSMContext):
             # Auto-generate title from first 50 chars
             title = problem_text[:50] + ("..." if len(problem_text) > 50 else "")
 
-            # Create description with full Telegram user context
-            description = (
-                f"**📱 Telegram User Info:**\n"
-                f"- **Full Name:** {user.full_name}\n"
-                f"- **Username:** @{user.username or 'не указан'}\n"
-                f"- **User ID:** `{user.id}`\n"
-                f"- **Chat:** {message.chat.title}\n"
-                f"- **Time:** {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                f"---\n\n"
-                f"**📝 Описание проблемы:**\n\n{problem_text}"
-            )
+            # Description now contains ONLY the problem text
+            # User context will be added as a comment after task creation
+            description = problem_text
 
             bot_logger.info(f"🔄 Creating auto-request: title='{title[:30]}'")
 
@@ -158,6 +169,30 @@ async def handle_request_text(message: Message, state: FSMContext):
 
                 # Build Plane link
                 plane_url = f"https://plane.hhivp.com/hhivp/projects/{plane_request.plane_project_id}/issues/{plane_request.plane_issue_id}"
+
+                # Add user context as a comment to the Plane issue
+                user_context_comment = (
+                    f"**📱 Telegram User Info:**\n"
+                    f"- **Full Name:** {user.full_name}\n"
+                    f"- **Username:** @{user.username or 'не указан'}\n"
+                    f"- **User ID:** `{user.id}`\n"
+                    f"- **Chat:** {message.chat.title}\n"
+                    f"- **Time:** {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+                )
+
+                try:
+                    from ...integrations.plane import plane_api
+                    comment_result = await plane_api.create_issue_comment(
+                        project_id=plane_request.plane_project_id,
+                        issue_id=plane_request.plane_issue_id,
+                        comment=user_context_comment
+                    )
+                    if comment_result:
+                        bot_logger.info(f"✅ Added user context comment to issue {plane_request.plane_issue_id}")
+                    else:
+                        bot_logger.warning(f"⚠️ Failed to add comment to issue {plane_request.plane_issue_id}")
+                except Exception as e:
+                    bot_logger.error(f"Error adding comment to Plane issue: {e}")
 
                 # Reply to user - ONLY ticket number (no link for clients)
                 await message.reply(
