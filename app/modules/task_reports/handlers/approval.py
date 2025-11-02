@@ -545,13 +545,104 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
 
 
 # ═══════════════════════════════════════════════════════════
-# CALLBACK: SEND TO REQUEST CHAT (new feature)
+# CALLBACK: SEND TO REQUEST CHAT - PREVIEW (new feature)
 # ═══════════════════════════════════════════════════════════
 
 @router.callback_query(F.data.startswith("send_to_request_chat:"))
-async def callback_send_to_request_chat(callback: CallbackQuery, state: FSMContext, bot: Bot):
+async def callback_send_to_request_chat(callback: CallbackQuery, state: FSMContext):
     """
-    Send completed report to original request chat (where /request was issued)
+    Show preview of what will be sent to request chat before actually sending
+
+    Displays exact message format that client will see + confirmation buttons
+    """
+    try:
+        try:
+            task_report_id = parse_report_id_safely(callback.data)
+        except ValueError as e:
+            bot_logger.error(f"Invalid report_id in callback: {e}")
+            await callback.answer("❌ Неверный ID отчёта", show_alert=True)
+            return
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await callback.answer("❌ Отчёт не найден", show_alert=True)
+                return
+
+            if not task_report.report_text:
+                await callback.answer("❌ Отчёт не заполнен", show_alert=True)
+                return
+
+            # Check if request chat ID exists
+            if not task_report.client_chat_id:
+                await callback.answer("❌ Нет привязки к чату заявки", show_alert=True)
+                return
+
+            # Build EXACT message that will be sent to request chat
+            task_title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            report_text_escaped = task_report.report_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+            request_chat_message = (
+                f"✅ <b>Заявка #{task_report.plane_sequence_id} выполнена!</b>\n\n"
+                f"<b>Задача:</b> {task_title_escaped}\n\n"
+                f"<b>Отчёт о выполненной работе:</b>\n\n{report_text_escaped}"
+            )
+
+            # Show preview with confirmation
+            preview_text = (
+                f"👁️ <b>Предпросмотр сообщения для чата заявки</b>\n\n"
+                f"<i>Вот что будет отправлено в чат, где создавалась заявка:</i>\n\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"{request_chat_message}\n\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"<i>После отправки также будут созданы:</i>\n"
+                f"📊 Запись в work_journal\n"
+                f"📈 Обновление Google Sheets\n"
+                f"👥 Уведомление в рабочую группу"
+            )
+
+            # Limit preview to 4000 chars (Telegram limit is 4096)
+            if len(preview_text) > 3900:
+                preview_text = preview_text[:3900] + "\n\n<i>... (текст обрезан для превью)</i>"
+
+            # Confirmation keyboard
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="✅ Подтвердить отправку",
+                    callback_data=f"confirm_send_to_request_chat:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="◀️ Назад к выбору",
+                    callback_data=f"preview_report:{task_report_id}"
+                )],
+                [InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cancel_report:{task_report_id}"
+                )]
+            ])
+
+            await callback.message.edit_text(
+                preview_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+
+            await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in send_to_request_chat preview: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# CALLBACK: CONFIRM SEND TO REQUEST CHAT (actual sending)
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("confirm_send_to_request_chat:"))
+async def callback_confirm_send_to_request_chat(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Actually send completed report to original request chat (after preview confirmation)
 
     Sends full report text to the chat where support request originated +
     creates work_journal entry + Google Sheets sync
