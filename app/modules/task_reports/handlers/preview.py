@@ -8,6 +8,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from ..utils import parse_report_id_safely, map_workers_to_display_names
+from ..keyboards import create_final_review_keyboard
 from ....database.database import get_async_session
 from ....services.task_reports_service import task_reports_service
 from ....utils.logger import bot_logger
@@ -55,6 +56,7 @@ async def callback_preview_report(callback: CallbackQuery):
             preview = preview_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
             has_client = bool(task_report.client_chat_id)
+            has_request_chat = bool(task_report.support_request_id and task_report.client_chat_id)
 
             # Format metadata (HTML)
             metadata_text = "\n<b>МЕТАДАННЫЕ РАБОТЫ:</b>\n"
@@ -88,33 +90,12 @@ async def callback_preview_report(callback: CallbackQuery):
             else:
                 metadata_text += "👥 Исполнители: ⚠️ <i>Не указано</i>\n"
 
-            # Build keyboard based on client availability
-            keyboard_buttons = []
-            if has_client:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text="✅ Одобрить и отправить",
-                        callback_data=f"approve_send:{task_report_id}"
-                    )
-                ])
-            else:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text="✅ Одобрить (без отправки)",
-                        callback_data=f"approve_only:{task_report_id}"
-                    )
-                ])
-
-            keyboard_buttons.extend([
-                [InlineKeyboardButton(
-                    text="✏️ Редактировать",
-                    callback_data=f"edit_report:{task_report_id}"
-                )],
-                [InlineKeyboardButton(
-                    text="❌ Отменить",
-                    callback_data=f"cancel_report:{task_report_id}"
-                )]
-            ])
+            # Build keyboard using shared function
+            keyboard = create_final_review_keyboard(
+                task_report_id=task_report_id,
+                has_client=has_client,
+                has_request_chat=has_request_chat
+            )
 
             await callback.message.edit_text(
                 f"👁️ <b>Предпросмотр отчёта</b>\n\n"
@@ -124,7 +105,7 @@ async def callback_preview_report(callback: CallbackQuery):
                 f"<b>ОТЧЁТ ДЛЯ КЛИЕНТА:</b>\n{preview}\n\n"
                 f"<i>Клиенту будет отправлен ТОЛЬКО текст отчёта (без метаданных)</i>",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+                reply_markup=keyboard
             )
 
             await callback.answer()

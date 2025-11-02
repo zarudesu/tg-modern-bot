@@ -545,6 +545,178 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
 
 
 # ═══════════════════════════════════════════════════════════
+# CALLBACK: SEND TO REQUEST CHAT (new feature)
+# ═══════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("send_to_request_chat:"))
+async def callback_send_to_request_chat(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """
+    Send completed report to original request chat (where /request was issued)
+
+    Sends full report text to the chat where support request originated +
+    creates work_journal entry + Google Sheets sync
+    """
+    try:
+        try:
+            task_report_id = parse_report_id_safely(callback.data)
+        except ValueError as e:
+            bot_logger.error(f"Invalid report_id in callback: {e}")
+            await callback.answer("❌ Неверный ID отчёта", show_alert=True)
+            return
+
+        async for session in get_async_session():
+            task_report = await task_reports_service.get_task_report(session, task_report_id)
+
+            if not task_report:
+                await callback.answer("❌ Отчёт не найден", show_alert=True)
+                return
+
+            if not task_report.report_text:
+                await callback.answer("❌ Отчёт не заполнен", show_alert=True)
+                return
+
+            # Check if request chat ID exists
+            if not task_report.client_chat_id:
+                await callback.answer("❌ Нет привязки к чату заявки", show_alert=True)
+                return
+
+            # Build report message for request chat
+            task_title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            report_text_escaped = task_report.report_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+            request_chat_message = (
+                f"✅ <b>Заявка #{task_report.plane_sequence_id} выполнена!</b>\n\n"
+                f"<b>Задача:</b> {task_title_escaped}\n\n"
+                f"<b>Отчёт о выполненной работе:</b>\n\n{report_text_escaped}"
+            )
+
+            # Send to request chat (with reply to original message)
+            try:
+                await bot.send_message(
+                    chat_id=task_report.client_chat_id,
+                    text=request_chat_message,
+                    parse_mode="HTML",
+                    reply_to_message_id=task_report.client_message_id if task_report.client_message_id else None
+                )
+
+                bot_logger.info(
+                    f"✅ Sent report #{task_report_id} to request chat {task_report.client_chat_id}"
+                )
+
+            except Exception as send_error:
+                bot_logger.error(f"❌ Error sending report to request chat: {send_error}")
+                await callback.answer(f"❌ Ошибка отправки в чат: {send_error}", show_alert=True)
+                return
+
+            # Approve report (if not already)
+            if task_report.status != 'approved':
+                await task_reports_service.approve_report(session, task_report_id)
+
+            # Mark as sent to client (since it's being sent to the request chat)
+            await task_reports_service.mark_sent_to_client(session, task_report_id)
+
+            # Now create work_journal entry if required fields are present
+            if task_report.company and task_report.work_duration and task_report.workers:
+                # Parse workers JSON
+                workers_list = []
+                try:
+                    workers_list = json.loads(task_report.workers)
+                except Exception as e:
+                    bot_logger.warning(f"Failed to parse workers JSON: {e}")
+
+                # Map telegram usernames to display names
+                from ..utils import map_workers_to_display_names_list
+                workers_display_list = map_workers_to_display_names_list(workers_list)
+
+                # Get user info
+                from ....database.models import BotUser
+                user = await session.get(BotUser, callback.from_user.id)
+
+                if callback.from_user.username:
+                    creator_name = f"@{callback.from_user.username}"
+                    user_email = f"{callback.from_user.username}@example.com"
+                else:
+                    creator_name = callback.from_user.first_name or f"User_{callback.from_user.id}"
+                    user_email = f"user_{callback.from_user.id}@telegram.bot"
+
+                # Create work journal entry
+                wj_service = work_journal_service.WorkJournalService(session)
+                work_date = task_report.closed_at.date() if task_report.closed_at else datetime.now().date()
+
+                entry = await wj_service.create_work_entry(
+                    telegram_user_id=callback.from_user.id,
+                    user_email=user_email,
+                    work_date=work_date,
+                    company=task_report.company,
+                    work_duration=task_report.work_duration,
+                    work_description=task_report.report_text or "",
+                    is_travel=task_report.is_travel or False,
+                    worker_names=workers_display_list,
+                    created_by_user_id=callback.from_user.id,
+                    created_by_name=creator_name
+                )
+
+                # Link to task report
+                task_report.work_journal_entry_id = entry.id
+                await session.commit()
+
+                bot_logger.info(f"✅ Created work_journal entry #{entry.id} linked to task report #{task_report_id}")
+
+                # Send to n8n (Google Sheets)
+                try:
+                    from ....services.n8n_integration_service import N8nIntegrationService
+
+                    user_data = {
+                        "first_name": user.first_name if user else callback.from_user.first_name,
+                        "username": user.username if user else callback.from_user.username
+                    }
+
+                    n8n_service = N8nIntegrationService()
+                    success = await n8n_service.send_with_retry(entry, user_data, session)
+                    if success:
+                        bot_logger.info(f"✅ Successfully sent entry {entry.id} to n8n (Google Sheets)")
+                except Exception as e:
+                    bot_logger.error(f"Error sending to n8n for entry {entry.id}: {e}")
+
+                # Send group chat notification with worker mentions
+                try:
+                    from ....services.worker_mention_service import WorkerMentionService
+
+                    if settings.work_journal_group_chat_id:
+                        mention_service = WorkerMentionService(session, callback.bot)
+
+                        success, errors = await mention_service.send_work_assignment_notifications(
+                            entry, creator_name, settings.work_journal_group_chat_id
+                        )
+
+                        if success:
+                            bot_logger.info(f"✅ Successfully sent group notification for entry {entry.id}")
+
+                        if errors:
+                            for error in errors[:2]:
+                                bot_logger.warning(f"Group notification error: {error}")
+                except Exception as e:
+                    bot_logger.error(f"Error sending group notifications: {e}")
+
+            # Clear FSM state
+            await state.clear()
+
+            # Notify admin
+            await callback.message.edit_text(
+                f"✅ <b>Отчёт отправлен в чат заявки!</b>\n\n"
+                f"💬 Сообщение отправлено в чат, где была создана заявка.\n"
+                f"📊 Work journal и Google Sheets обновлены.",
+                reply_markup=get_back_to_main_menu_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer("✅ Отправлено в чат заявки")
+
+    except Exception as e:
+        bot_logger.error(f"❌ Error in send_to_request_chat callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════
 # CALLBACK: SEND TO GROUP (new feature)
 # ═══════════════════════════════════════════════════════════
 

@@ -231,7 +231,7 @@ def create_workers_keyboard(
     return builder.as_markup()
 
 
-def create_final_review_keyboard(task_report_id: int, has_client: bool) -> InlineKeyboardMarkup:
+def create_final_review_keyboard(task_report_id: int, has_client: bool, has_request_chat: bool = False) -> InlineKeyboardMarkup:
     """Клавиатура финального просмотра перед отправкой"""
     builder = InlineKeyboardBuilder()
 
@@ -243,12 +243,21 @@ def create_final_review_keyboard(task_report_id: int, has_client: bool) -> Inlin
         )
     )
 
-    # Кнопка отправки (если есть клиент)
+    # Кнопка отправки (если есть клиент в личке)
     if has_client:
         builder.row(
             InlineKeyboardButton(
                 text=f"{EMOJI['check']} Отправить клиенту",
                 callback_data=f"approve_send:{task_report_id}"
+            )
+        )
+
+    # Кнопка "Отправить в чат заявки" (если задача связана с support_request)
+    if has_request_chat:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{EMOJI['group']} Отправить в чат заявки",
+                callback_data=f"send_to_request_chat:{task_report_id}"
             )
         )
 
