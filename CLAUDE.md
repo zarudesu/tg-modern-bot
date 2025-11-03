@@ -132,15 +132,41 @@ python3 test_modules_isolation.py # Module isolation (CRITICAL!)
 python3 test_email_fix.py         # Email filter tests
 ```
 
-### Production
+### Production Deployment
+
+**⚡ NEW: Use `deploy.sh` script for all production deployments**
+
 ```bash
-# SSH access (passwordless with key)
+# Full deployment (after code changes)
+./deploy.sh full              # push + pull + build + rebuild + logs
+
+# Quick deployment (minor changes, no rebuild)
+./deploy.sh quick             # push + pull + restart + logs
+
+# Individual commands
+./deploy.sh push              # Push to GitHub
+./deploy.sh pull              # Pull on server
+./deploy.sh build             # Rebuild Docker image
+./deploy.sh rebuild           # Rebuild and restart container
+./deploy.sh restart           # Just restart (for .env changes)
+./deploy.sh logs              # View bot logs
+./deploy.sh status            # Check container status
+
+# Options
+./deploy.sh full --no-cache   # Force clean build (slow but safe)
+./deploy.sh logs --tail 100   # Show last 100 log lines
+```
+
+**Manual Commands (if needed):**
+```bash
+# SSH access (passwordless with RSA key)
 ssh hhivp@rd.hhivp.com            # Connect to production server
 
 # Deployment
 cd /opt/tg-modern-bot && git pull origin main  # Pull latest code
 docker-compose -f docker-compose.prod.yml build --no-cache bot  # Rebuild
-docker-compose -f docker-compose.prod.yml up -d --force-recreate bot  # Deploy
+docker stop hhivp-bot-app-prod && docker rm hhivp-bot-app-prod  # Remove old
+docker-compose -f docker-compose.prod.yml up -d bot  # Start new
 
 # Monitoring
 docker logs hhivp-bot-app-prod --tail 100 -f  # View logs
@@ -149,10 +175,11 @@ curl http://localhost:8083/health  # Webhook health (bot runs on 8083)
 ```
 
 **Production Notes:**
-- Bot webhook runs on **port 8083** (exposed from container's 8080)
-- n8n workflows send webhooks to `http://rd.hhivp.com:8083/webhooks/task-completed`
+- Bot webhook runs on **port 8083** (external) → 8080 (internal)
+- n8n workflows send webhooks to: `http://rd.hhivp.com:8083/webhooks/task-completed`
 - PostgreSQL container: `e30e3f83b282_hhivp-bot-postgres-prod`
 - Database queries: `docker exec e30e3f83b282_hhivp-bot-postgres-prod psql -U hhivp_bot -d hhivp_bot_prod -c "..."`
+- SSH key: `~/.ssh/id_rsa` (4096-bit RSA, passwordless authentication)
 
 ---
 
@@ -195,31 +222,68 @@ Client receives + Google Sheets + Group notification
 
 **Purpose:** Allow users to create support requests from group chats → auto-creates tasks in Plane.so
 
-**Quick Flow:**
+**Quick Flows:**
+
+**Flow 1: User Creates Request**
 ```
 User runs /request in group → Types problem description →
 Bot creates Plane task + notifies admins → User gets ticket number
 ```
 
+**Flow 2: Create Task from Any Message (NEW!)**
+```
+User sees problem in group message → Anyone replies with /task →
+Bot creates Plane task with original author as owner + full context
+```
+
 **Key Features:**
 - ✅ Simple user flow: `/request` → type problem → done
+- ✅ **NEW:** `/task` command - create tasks from any message via reply
 - ✅ Auto-creates tasks in Plane with full user context
 - ✅ Maps group chats to specific Plane projects
 - ✅ Notifies admins about new requests
 - ✅ FSM-based state management (no message conflicts)
+- ✅ 10-minute timeout for `/request` flow (prevents hanging states)
 
-**Setup Required:**
-- Admin runs `/setup_chat` in group to map to Plane project
-- Users can then create requests with `/request`
-
-**Current Status:**
-- ✅ Module loaded and active (main.py:273-275)
-- ⚠️ No chat mappings configured yet (run `/setup_chat` first)
+**User Commands:**
+- `/request` - Create new support request (FSM flow)
+- `/task [comment]` - Reply to any message to create task (instant)
 
 **Admin Commands:**
 - `/setup_chat` - Configure group for support requests
 - `/list_chats` - List all configured groups
 - `/remove_chat` - Remove group configuration
+
+**Setup Required:**
+- Admin runs `/setup_chat` in group to map to Plane project
+- Users can then create requests with `/request` or `/task`
+
+**`/task` Command Details:**
+- **Usage:** Reply to any message + `/task [optional comment]`
+- **Available to:** All users (not just admins)
+- **Priority:** Always medium
+- **Task title:** Auto-generated from first 50 characters
+- **Task owner:** Original message author
+- **Context saved in Plane comment:**
+  - Original author info (name, username, ID)
+  - Creator info (who used `/task`)
+  - Message link (for public/private groups)
+  - Optional additional comment
+  - Chat name and timestamp
+- **Admin notification:** Shows 🎯 icon (vs ✅ for `/request`)
+
+**Example `/task` Usage:**
+```
+User A: "Сервер не отвечает, нужна помощь"
+User B: /task Высокий приоритет, проверьте ASAP
+Bot: ✅ Задача создана в Plane (автор: User A, создал: User B)
+```
+
+**Current Status:**
+- ✅ Module loaded and active (main.py:273-275)
+- ✅ `/request` flow with FSM + 10-minute timeout
+- ✅ `/task` command for quick task creation from messages
+- ⚠️ No chat mappings configured yet (run `/setup_chat` first)
 
 **📚 Full Documentation:** [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md)
 
@@ -838,8 +902,8 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 ---
 
-**Last Updated:** 2025-10-09
-**Bot Version:** 2.5 (Task Reports Production Ready)
-**Questions?** Check logs: `make bot-logs`
+**Last Updated:** 2025-11-03
+**Bot Version:** 2.6 (Support Requests: `/task` command + deploy.sh script)
+**Questions?** Check logs: `make bot-logs` or `./deploy.sh logs`
 
 📚 **See also:** [README_DOCKER.md](README_DOCKER.md) - Detailed Docker development guide
