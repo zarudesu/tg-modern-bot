@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## MCP Tools
+**Перед выбором инструмента спроси `mcp-compass`** — он порекомендует оптимальный MCP для задачи.
+
 ---
 
 ## 📑 Table of Contents
