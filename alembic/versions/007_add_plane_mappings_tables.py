@@ -53,8 +53,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('plane_project_name')
     )
-    op.create_index('idx_company_plane_project', 'company_mappings', ['plane_project_name'])
-    op.create_index('idx_company_active', 'company_mappings', ['is_active'])
+    op.create_index('idx_company_mapping_project', 'company_mappings', ['plane_project_name'])
+    op.create_index('idx_company_mapping_active', 'company_mappings', ['is_active'])
 
     # Insert initial data from hardcoded mappings
     _insert_initial_plane_mappings()
@@ -137,8 +137,8 @@ def _insert_initial_company_mappings():
 
 
 def downgrade() -> None:
-    op.drop_index('idx_company_active', table_name='company_mappings')
-    op.drop_index('idx_company_plane_project', table_name='company_mappings')
+    op.drop_index('idx_company_mapping_active', table_name='company_mappings')
+    op.drop_index('idx_company_mapping_project', table_name='company_mappings')
     op.drop_table('company_mappings')
 
     op.drop_index('idx_plane_mapping_active', table_name='plane_telegram_mappings')

@@ -84,8 +84,8 @@ class CompanyMapping(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("idx_company_plane_project", "plane_project_name"),
-        Index("idx_company_active", "is_active"),
+        Index("idx_company_mapping_project", "plane_project_name"),
+        Index("idx_company_mapping_active", "is_active"),
     )
 
     def __repr__(self):
