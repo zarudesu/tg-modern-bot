@@ -1,7 +1,7 @@
 """Add plane_telegram_mappings and company_mappings tables
 
-Revision ID: 006_plane_mappings
-Revises: 005_add_task_comments_field
+Revision ID: 007_plane_mappings
+Revises: 006_add_project_identifier
 Create Date: 2026-01-20
 
 Replaces hardcoded PLANE_TO_TELEGRAM_MAP and COMPANY_MAPPING
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers
-revision = '006_plane_mappings'
-down_revision = '005_add_task_comments_field'
+revision = '007_plane_mappings'
+down_revision = '006_add_project_identifier'
 branch_labels = None
 depends_on = None
 

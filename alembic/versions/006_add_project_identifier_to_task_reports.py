@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '006_add_project_identifier'
-down_revision = '005_add_task_comments_field'
+down_revision = '005'
 branch_labels = None
 depends_on = None
 
