@@ -104,7 +104,7 @@ cmd_build() {
     if [ -n "$NO_CACHE" ]; then
         log_warning "Using --no-cache: build will be slow but clean"
     fi
-    $SSH_CMD "cd ${PROJECT_PATH} && docker-compose -f ${COMPOSE_FILE} build ${NO_CACHE} bot"
+    $SSH_CMD "cd ${PROJECT_PATH} && docker compose -f ${COMPOSE_FILE} build ${NO_CACHE} bot"
     log_success "Docker image built"
 }
 
@@ -117,7 +117,7 @@ cmd_rebuild() {
 
     # Start new container
     log_info "Starting new container..."
-    $SSH_CMD "cd ${PROJECT_PATH} && docker-compose -f ${COMPOSE_FILE} up -d bot"
+    $SSH_CMD "cd ${PROJECT_PATH} && docker compose -f ${COMPOSE_FILE} up -d bot"
 
     log_success "Bot container rebuilt and started"
 
