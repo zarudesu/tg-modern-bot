@@ -2,13 +2,19 @@
 Event Bus - центральная система событий для reactive архитектуры
 
 Позволяет модулям реагировать на события без жёсткой связанности
+
+FIXES (2026-01-20):
+- Added TTL-based event history cleanup to prevent memory leak
+- Added background task tracking for graceful shutdown
+- Reduced max_history from 1000 to 100 (sufficient for debugging)
 """
 import asyncio
-from typing import Dict, List, Callable, Any, Optional, Type
+from typing import Dict, List, Callable, Any, Optional, Type, Set
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from enum import Enum
+import weakref
 
 from ...utils.logger import bot_logger
 
@@ -80,17 +86,82 @@ class EventBus:
     Event Bus - центральная шина событий
 
     Singleton для управления всеми событиями в приложении
+
+    FIXES (2026-01-20):
+    - Instance-level attributes instead of class-level
+    - TTL-based cleanup (1 hour default)
+    - Background task tracking for graceful shutdown
+    - Reduced max_history to 100
     """
     _instance = None
-    _handlers: Dict[str, List[EventHandler]] = {}
-    _middleware: List[Callable] = []
-    _event_history: List[Event] = []
-    _max_history: int = 1000
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            # Initialize instance attributes here (not class-level!)
+            cls._instance._handlers: Dict[str, List[EventHandler]] = {}
+            cls._instance._middleware: List[Callable] = []
+            cls._instance._event_history: List[Event] = []
+            cls._instance._max_history: int = 100  # Reduced from 1000
+            cls._instance._event_ttl_hours: int = 1  # Events older than 1 hour are cleared
+            cls._instance._background_tasks: Set[asyncio.Task] = set()
+            cls._instance._cleanup_task: Optional[asyncio.Task] = None
         return cls._instance
+
+    async def start_cleanup_loop(self, interval_minutes: int = 30):
+        """Start periodic cleanup of old events (call on bot startup)"""
+        if self._cleanup_task is not None:
+            return  # Already running
+
+        async def cleanup_loop():
+            while True:
+                try:
+                    await asyncio.sleep(interval_minutes * 60)
+                    self._cleanup_old_events()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    bot_logger.error(f"Event cleanup error: {e}")
+
+        self._cleanup_task = asyncio.create_task(cleanup_loop())
+        bot_logger.info(f"Event cleanup loop started (interval: {interval_minutes}min)")
+
+    async def stop_cleanup_loop(self):
+        """Stop cleanup loop (call on bot shutdown)"""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
+
+    def _cleanup_old_events(self):
+        """Remove events older than TTL"""
+        if not self._event_history:
+            return
+
+        cutoff = datetime.now() - timedelta(hours=self._event_ttl_hours)
+        old_count = len(self._event_history)
+        self._event_history = [e for e in self._event_history if e.timestamp > cutoff]
+        removed = old_count - len(self._event_history)
+
+        if removed > 0:
+            bot_logger.debug(f"Cleaned up {removed} old events (TTL: {self._event_ttl_hours}h)")
+
+    async def wait_for_background_tasks(self, timeout: float = 5.0):
+        """Wait for all background tasks to complete (call on shutdown)"""
+        if not self._background_tasks:
+            return
+
+        bot_logger.info(f"Waiting for {len(self._background_tasks)} background tasks...")
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*self._background_tasks, return_exceptions=True),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            bot_logger.warning(f"Background tasks timeout after {timeout}s")
 
     def register_handler(self, handler: EventHandler):
         """Регистрация обработчика событий"""
@@ -132,10 +203,12 @@ class EventBus:
         Returns:
             Список результатов от обработчиков (если wait=True)
         """
-        # Добавляем в историю
+        # FIX (2026-01-20): Add to history with size limit AND TTL cleanup
         self._event_history.append(event)
-        if len(self._event_history) > self._max_history:
+        # Size-based cleanup (immediate)
+        while len(self._event_history) > self._max_history:
             self._event_history.pop(0)
+        # TTL-based cleanup runs periodically via start_cleanup_loop()
 
         # Применяем middleware
         for middleware in self._middleware:
@@ -173,8 +246,10 @@ class EventBus:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             return results
         else:
-            # Запускаем асинхронно без ожидания
-            asyncio.create_task(asyncio.gather(*tasks, return_exceptions=True))
+            # FIX (2026-01-20): Track background tasks for graceful shutdown
+            task = asyncio.create_task(asyncio.gather(*tasks, return_exceptions=True))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             return []
 
     async def _execute_handler(self, handler: EventHandler, event: Event):

@@ -1,12 +1,18 @@
 """
 Google Sheets интеграция для парсинга данных журнала работ
+
+FIXES (2026-01-20):
+- Wrapped blocking gspread calls in run_in_executor to prevent event loop blocking
+- gspread is sync-only, so all I/O operations run in thread pool
 """
 import json
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -38,14 +44,29 @@ class SheetWorkEntry:
 
 class GoogleSheetsParser:
     """Парсер Google Sheets для синхронизации данных журнала работ"""
-    
+
+    # FIX (2026-01-20): Shared thread pool for blocking gspread operations
+    _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="gspread")
+
     def __init__(self):
         self.service_account_email = "n8n-sheets-integration@hhivp-plane.iam.gserviceaccount.com"
         self.spreadsheet_id = settings.google_sheets_id
         self.credentials = None
         self.client = None
         self.worksheet = None
-        
+
+    def _sync_authorize(self, credentials):
+        """Sync method for thread pool - authorizes gspread client"""
+        return gspread.authorize(credentials)
+
+    def _sync_open_spreadsheet(self, spreadsheet_id):
+        """Sync method for thread pool - opens spreadsheet"""
+        return self.client.open_by_key(spreadsheet_id)
+
+    def _sync_get_all_records(self):
+        """Sync method for thread pool - gets all records from worksheet"""
+        return self.worksheet.get_all_records()
+
     async def initialize(self) -> bool:
         """Инициализация Google Sheets клиента"""
         try:
@@ -72,11 +93,17 @@ class GoogleSheetsParser:
             else:
                 logger.error("Google Sheets credentials not found in config")
                 return False
-            
-            self.client = gspread.authorize(self.credentials)
-            logger.info("Google Sheets client initialized successfully")
+
+            # FIX (2026-01-20): Run blocking gspread.authorize in thread pool
+            loop = asyncio.get_event_loop()
+            self.client = await loop.run_in_executor(
+                self._executor,
+                self._sync_authorize,
+                self.credentials
+            )
+            logger.info("Google Sheets client initialized successfully (async)")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize Google Sheets client: {e}")
             return False
@@ -86,19 +113,30 @@ class GoogleSheetsParser:
         try:
             if not self.client:
                 await self.initialize()
-            
+
             if not self.client:
                 return False
-            
-            # Подключаемся к таблице
-            spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-            
-            # Получаем первый лист или лист с нужным названием
-            self.worksheet = spreadsheet.get_worksheet(0)  # Первый лист
-            
-            logger.info(f"Connected to Google Sheet: {spreadsheet.title}")
+
+            # FIX (2026-01-20): Run blocking gspread calls in thread pool
+            loop = asyncio.get_event_loop()
+
+            # Подключаемся к таблице (blocking I/O)
+            spreadsheet = await loop.run_in_executor(
+                self._executor,
+                self._sync_open_spreadsheet,
+                self.spreadsheet_id
+            )
+
+            # Получаем первый лист (blocking I/O)
+            self.worksheet = await loop.run_in_executor(
+                self._executor,
+                spreadsheet.get_worksheet,
+                0  # Первый лист
+            )
+
+            logger.info(f"Connected to Google Sheet: {spreadsheet.title} (async)")
             return True
-            
+
         except SpreadsheetNotFound:
             logger.error(f"Spreadsheet with ID {self.spreadsheet_id} not found")
             return False
@@ -108,20 +146,24 @@ class GoogleSheetsParser:
         except Exception as e:
             logger.error(f"Failed to connect to Google Sheet: {e}")
             return False
-    
+
     async def get_all_entries(self) -> List[Dict[str, Any]]:
         """Получение всех записей из Google Sheets"""
         try:
             if not self.worksheet:
                 if not await self.connect_to_sheet():
                     return []
-            
-            # Получаем все данные
-            all_values = self.worksheet.get_all_records()
-            logger.info(f"Retrieved {len(all_values)} entries from Google Sheets")
-            
+
+            # FIX (2026-01-20): Run blocking gspread calls in thread pool
+            loop = asyncio.get_event_loop()
+            all_values = await loop.run_in_executor(
+                self._executor,
+                self._sync_get_all_records
+            )
+            logger.info(f"Retrieved {len(all_values)} entries from Google Sheets (async)")
+
             return all_values
-            
+
         except Exception as e:
             logger.error(f"Failed to get entries from Google Sheets: {e}")
             return []

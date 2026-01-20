@@ -7,13 +7,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 🚦 Session Continuity (READ FIRST!)
+
+> **For new sessions, compact mode, or resuming work — start here!**
+
+### Before Starting Work
+
+```bash
+# 1. Check current roadmap & issues
+cat docs/ROADMAP.md | grep -A2 "Status:"
+
+# 2. Check recent commits
+git log --oneline -5
+
+# 3. Check if tests pass
+python3 test_modules_isolation.py && python3 test_basic.py
+```
+
+### Current Priority (2026-01-20)
+
+**Phase 1: Critical Fixes (IN PROGRESS)**
+- [ ] Event Bus memory leak (`app/core/events/event_bus.py:135`)
+- [ ] Webhook error exposure (`app/webhooks/server.py:355`)
+- [ ] Webhook signature required (`app/webhooks/server.py:65`)
+- [ ] Google Sheets blocking I/O (`app/integrations/google_sheets.py:49`)
+- [ ] aiohttp session reuse (`app/services/n8n_integration_service.py:104`)
+
+**See full details:** [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+### After Completing Work
+
+```bash
+# 1. Run tests
+python3 test_modules_isolation.py
+python3 test_basic.py
+
+# 2. Update ROADMAP.md status (mark [x] completed)
+
+# 3. Commit with convention
+git add -A
+git commit -m "fix(scope): description"
+
+# 4. If deploying
+./deploy.sh full
+```
+
+### Commit Convention
+```
+fix(webhook): Remove error details from response
+feat(n8n): Add voice transcription webhook
+refactor(services): Implement dependency injection
+docs: Update roadmap after Phase 1
+```
+
+---
+
 ## 📑 Table of Contents
 
+- [Session Continuity](#-session-continuity-read-first)
 - [Quick Start](#-quick-start)
 - [Essential Commands](#-essential-commands)
 - [Module Status Dashboard](#-module-status-dashboard)
+- [Known Issues & Technical Debt](#-known-issues--technical-debt)
 - [Architecture Overview](#-architecture-overview)
 - [Development Guide](#-development-guide)
+- [n8n Integration Plans](#-n8n-integration-plans)
 - [Configuration](#-configuration)
 - [Security & Credentials](#-security--credentials)
 - [Debugging](#-debugging)
@@ -289,6 +347,77 @@ Bot: ✅ Задача создана в Plane (автор: User A, создал:
 - ⚠️ No chat mappings configured yet (run `/setup_chat` first)
 
 **📚 Full Documentation:** [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md)
+
+---
+
+## ⚠️ Known Issues & Technical Debt
+
+> **Full details:** [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
+### Critical (Fix Immediately)
+
+| Issue | File | Impact |
+|-------|------|--------|
+| Event Bus memory leak | `app/core/events/event_bus.py:135` | ~360 MB/month growth |
+| Webhook exposes errors | `app/webhooks/server.py:355` | Security: stack trace leak |
+| Webhook verification optional | `app/webhooks/server.py:65` | Security: spoofed webhooks |
+| Google Sheets blocking | `app/integrations/google_sheets.py:49` | 1-5s event loop block |
+| aiohttp new session/request | `app/services/n8n_integration_service.py:104` | 3-5x slower API calls |
+
+### Architecture Issues
+
+| Issue | Impact | Solution |
+|-------|--------|----------|
+| Global singletons | Untestable, fragile init | Dependency Injection |
+| Hardcoded Telegram IDs | `task_reports_service.py:28-100` | Move to database |
+| N+1 queries | Performance | Use `selectinload()` |
+| Rate limiting not implemented | DoS vulnerability | Add middleware |
+| DB pool size=5 | Connection exhaustion | Increase to 20 |
+
+### Performance Limits
+
+- **Current capacity:** ~100 concurrent users
+- **Memory growth:** ~360 MB/month (event history)
+- **API latency:** 3-5x slower due to session recreation
+
+---
+
+## 🔗 n8n Integration Plans
+
+### Current Integrations (Production)
+
+| Workflow | Webhook | Description |
+|----------|---------|-------------|
+| Task Completed | `POST /webhooks/task-completed` | Plane.so → Bot notification |
+| Work Journal Sync | n8n → Google Sheets | Journal entries sync |
+| Task Reports Sync | n8n → Google Sheets | Reports sync |
+
+### Planned Integrations
+
+#### Voice Transcription (Phase 3)
+```
+User voice message → Bot → n8n → OpenAI Whisper → Transcription
+Webhook: POST /webhooks/voice-transcribe
+```
+
+#### AI Report Generation (Phase 3)
+```
+Task data → n8n → OpenAI/Claude → Formatted report → Bot
+Webhook: POST /webhooks/generate-report
+```
+
+#### Daily Summary (Phase 3)
+```
+Scheduled 18:00 → n8n queries tasks → AI summary → Telegram group
+Webhook: POST /webhooks/daily-summary
+```
+
+### Webhook Security Requirements
+- All webhooks MUST verify `X-Webhook-Signature` header
+- Use `N8N_WEBHOOK_SECRET` environment variable
+- Log all calls with request ID for debugging
+
+**📚 Full Integration Specs:** [`docs/ROADMAP.md#n8n-integration-plans`](docs/ROADMAP.md#-n8n-integration-plans)
 
 ---
 
@@ -905,8 +1034,31 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 ---
 
-**Last Updated:** 2025-11-03
-**Bot Version:** 2.6 (Support Requests: `/task` command + deploy.sh script)
+## 📝 Documentation Maintenance
+
+### When to Update This File
+
+1. **After fixing critical issues** — Update Known Issues section
+2. **After adding new features** — Update Module Status Dashboard
+3. **After changing architecture** — Update Architecture Overview
+4. **After adding n8n workflows** — Update n8n Integration Plans
+
+### Related Documentation
+
+| File | Purpose | Update When |
+|------|---------|-------------|
+| `docs/ROADMAP.md` | Technical debt & roadmap | After completing issues |
+| `docs/guides/task-reports-guide.md` | Task Reports module | After module changes |
+| `docs/guides/support-requests-guide.md` | Support module | After module changes |
+| `SECRETS.md` | Production credentials | After credential changes |
+
+---
+
+**Last Updated:** 2026-01-20
+**Bot Version:** 2.7 (Code Audit + Session Continuity)
+**Current Phase:** Phase 1 - Critical Fixes
 **Questions?** Check logs: `make bot-logs` or `./deploy.sh logs`
 
-📚 **See also:** [README_DOCKER.md](README_DOCKER.md) - Detailed Docker development guide
+📚 **See also:**
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Development roadmap & technical debt
+- [README_DOCKER.md](README_DOCKER.md) - Docker development guide

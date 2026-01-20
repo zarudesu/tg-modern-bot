@@ -155,8 +155,25 @@ class WebhookServer:
         }
         """
         try:
-            # Получаем данные
-            data = await request.json()
+            # FIX (2026-01-20): Verify webhook signature BEFORE processing
+            webhook_secret = getattr(settings, 'n8n_webhook_secret', None) or getattr(settings, 'plane_webhook_secret', None)
+            if webhook_secret:
+                raw_body = await request.read()
+                signature = request.headers.get('X-Webhook-Signature') or request.headers.get('X-N8n-Signature')
+                if not self._verify_signature(raw_body.decode(), signature, webhook_secret):
+                    bot_logger.warning(
+                        "Invalid webhook signature for task-completed",
+                        extra={"remote_ip": request.remote}
+                    )
+                    return web.json_response({'error': 'Invalid signature'}, status=401)
+                data = json.loads(raw_body)
+            else:
+                # Warning: No signature verification configured
+                bot_logger.warning(
+                    "⚠️ Webhook signature verification NOT configured! "
+                    "Set N8N_WEBHOOK_SECRET or PLANE_WEBHOOK_SECRET env variable."
+                )
+                data = await request.json()
 
             bot_logger.info(
                 f"📨 Received task-completed webhook: "
@@ -348,11 +365,16 @@ class WebhookServer:
             bot_logger.error("Invalid JSON in task-completed webhook")
             return web.json_response({'error': 'Invalid JSON'}, status=400)
         except Exception as e:
-            bot_logger.error(f"Error processing task-completed webhook: {e}")
+            # FIX (2026-01-20): Don't expose error details in response (security)
+            # Log full error server-side only
             import traceback
-            bot_logger.error(traceback.format_exc())
+            bot_logger.error(
+                f"Error processing task-completed webhook: {e}",
+                extra={"traceback": traceback.format_exc()}
+            )
+            # Return generic error to client
             return web.json_response(
-                {'error': 'Internal server error', 'details': str(e)},
+                {'error': 'Internal server error'},
                 status=500
             )
 
