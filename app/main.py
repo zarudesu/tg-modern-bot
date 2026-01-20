@@ -15,6 +15,7 @@ from .middleware.auth import AuthMiddleware
 from .middleware.logging import LoggingMiddleware, GroupMonitoringMiddleware, PerformanceMiddleware
 from .middleware.database import DatabaseSessionMiddleware
 from .middleware.event_publisher import EventPublisherMiddleware
+from .middleware.rate_limit import RateLimitMiddleware
 
 # Core системы
 from .core.events.event_bus import event_bus
@@ -219,22 +220,26 @@ async def main():
         dp.message.middleware(DatabaseSessionMiddleware())
         dp.callback_query.middleware(DatabaseSessionMiddleware())
         
-        # 2. Performance monitoring  
+        # 2. Performance monitoring
         dp.message.middleware(PerformanceMiddleware())
         dp.callback_query.middleware(PerformanceMiddleware())
-        
-        # 3. Logging (использует db_session)
+
+        # 3. Rate limiting (reject spam early, before auth)
+        dp.message.middleware(RateLimitMiddleware())
+        dp.callback_query.middleware(RateLimitMiddleware())
+
+        # 4. Logging (использует db_session)
         dp.message.middleware(LoggingMiddleware())
         dp.callback_query.middleware(LoggingMiddleware())
-        
-        # 4. Group monitoring
+
+        # 5. Group monitoring
         dp.message.middleware(GroupMonitoringMiddleware())
-        
-        # 5. Auth (использует db_session)
+
+        # 6. Auth (использует db_session)
         dp.message.middleware(AuthMiddleware())
         dp.callback_query.middleware(AuthMiddleware())
 
-        # 6. Event Publisher - публикация событий для Event Bus
+        # 7. Event Publisher - публикация событий для Event Bus
         dp.message.middleware(EventPublisherMiddleware())
         dp.callback_query.middleware(EventPublisherMiddleware())
 

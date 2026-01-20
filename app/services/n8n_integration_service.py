@@ -259,55 +259,62 @@ class N8nIntegrationService:
 async def process_pending_entries(session: AsyncSession) -> int:
     """
     Фоновая задача для обработки записей, ожидающих синхронизации
-    
+
+    FIX (2026-01-20): Fixed N+1 query - now fetches all users in single query
+
     Returns:
         int: Количество успешно обработанных записей
     """
     from .work_journal_service import WorkJournalService
     from ..database.models import BotUser
     from sqlalchemy import select
-    
+
     try:
         service = WorkJournalService(session)
         n8n_service = N8nIntegrationService()
-        
+
         # Получаем записи, ожидающие синхронизации
         pending_entries = await service.get_pending_sync_entries()
-        
+
         if not pending_entries:
             return 0
-        
+
         bot_logger.info(f"Processing {len(pending_entries)} pending n8n sync entries")
-        
+
+        # FIX (2026-01-20): Batch fetch all users in ONE query instead of N queries
+        user_ids = {entry.telegram_user_id for entry in pending_entries}
+        users_result = await session.execute(
+            select(BotUser).where(BotUser.telegram_user_id.in_(user_ids))
+        )
+        users_dict = {u.telegram_user_id: u for u in users_result.scalars().all()}
+        bot_logger.debug(f"Batch loaded {len(users_dict)} users for {len(pending_entries)} entries")
+
         success_count = 0
-        
+
         for entry in pending_entries:
             try:
-                # Получаем данные пользователя
-                user_result = await session.execute(
-                    select(BotUser).where(BotUser.telegram_user_id == entry.telegram_user_id)
-                )
-                user = user_result.scalar_one_or_none()
-                
+                # FIX: Use pre-fetched user instead of individual query
+                user = users_dict.get(entry.telegram_user_id)
+
                 if not user:
                     bot_logger.error(f"User {entry.telegram_user_id} not found for entry {entry.id}")
                     continue
-                
+
                 user_data = {
                     "first_name": user.first_name,
                     "username": user.username
                 }
-                
+
                 # Отправляем с повторными попытками
                 success = await n8n_service.send_with_retry(entry, user_data, session)
-                
+
                 if success:
                     success_count += 1
-                    
+
             except Exception as e:
                 bot_logger.error(f"Error processing entry {entry.id}: {e}")
                 continue
-        
+
         bot_logger.info(f"Successfully processed {success_count}/{len(pending_entries)} entries")
         return success_count
         
