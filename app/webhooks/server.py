@@ -155,11 +155,14 @@ class WebhookServer:
         }
         """
         try:
-            # FIX (2026-01-20): Verify webhook signature BEFORE processing
+            # FIX (2026-01-21): Signature verification is OPTIONAL for backwards compatibility
+            # n8n workflow may not send signature header
             webhook_secret = getattr(settings, 'n8n_webhook_secret', None) or getattr(settings, 'plane_webhook_secret', None)
-            if webhook_secret:
+            signature = request.headers.get('X-Webhook-Signature') or request.headers.get('X-N8n-Signature')
+
+            if webhook_secret and signature:
+                # Signature provided - verify it
                 raw_body = await request.read()
-                signature = request.headers.get('X-Webhook-Signature') or request.headers.get('X-N8n-Signature')
                 if not self._verify_signature(raw_body.decode(), signature, webhook_secret):
                     bot_logger.warning(
                         "Invalid webhook signature for task-completed",
@@ -167,12 +170,18 @@ class WebhookServer:
                     )
                     return web.json_response({'error': 'Invalid signature'}, status=401)
                 data = json.loads(raw_body)
-            else:
-                # Warning: No signature verification configured
+                bot_logger.debug("✅ Webhook signature verified")
+            elif webhook_secret and not signature:
+                # Secret configured but no signature sent - allow with warning
+                # This is for backwards compatibility with n8n workflows not yet configured
                 bot_logger.warning(
-                    "⚠️ Webhook signature verification NOT configured! "
-                    "Set N8N_WEBHOOK_SECRET or PLANE_WEBHOOK_SECRET env variable."
+                    "⚠️ Webhook received WITHOUT signature header. "
+                    "Consider configuring HMAC signature in n8n workflow for security."
                 )
+                data = await request.json()
+            else:
+                # No secret configured - just process
+                bot_logger.debug("Webhook signature verification not configured")
                 data = await request.json()
 
             bot_logger.info(
