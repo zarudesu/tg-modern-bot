@@ -42,9 +42,8 @@ async def callback_preview_report(callback: CallbackQuery):
                 await callback.answer("❌ Отчёт не найден", show_alert=True)
                 return
 
-            if not task_report.report_text:
-                await callback.answer("❌ Отчёт пока не заполнен", show_alert=True)
-                return
+            # BUG FIX (2026-01-21): Show preview even if report_text is empty
+            # User can still send metadata-only report or edit text from preview
 
             # Show report preview with metadata
             # Escape HTML characters in report text

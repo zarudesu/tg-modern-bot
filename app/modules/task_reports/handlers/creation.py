@@ -154,18 +154,27 @@ async def callback_fill_report(callback: CallbackQuery, state: FSMContext):
                     ])
                 )
             else:
-                # НОВЫЙ ФЛОУ: Сразу показываем кнопки выбора длительности (метаданные)
-                from ..keyboards import create_duration_keyboard
-
+                # BUG FIX (2026-01-21): Не пропускаем ввод текста!
+                # Даём юзеру возможность ввести текст или пропустить
                 # Escape task title
-                title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                title_escaped = task_report.task_title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;') if task_report.task_title else "Без названия"
 
                 await callback.message.edit_text(
                     f"📝 <b>Заполнение отчёта для задачи #{task_report.plane_sequence_id}</b>\n\n"
                     f"<b>Название задачи:</b> {title_escaped}\n\n"
-                    f"⏱️ <b>Шаг 1/4:</b> Выберите длительность работы:",
+                    f"⚠️ <i>Текст отчёта не был автоматически заполнен (нет комментариев в Plane)</i>\n\n"
+                    f"<b>Отправьте текст отчёта</b> или нажмите «Пропустить» для заполнения только метаданных:",
                     parse_mode="HTML",
-                    reply_markup=create_duration_keyboard(task_report_id)
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="⏭️ Пропустить (только метаданные)",
+                            callback_data=f"agree_text:{task_report_id}"
+                        )],
+                        [InlineKeyboardButton(
+                            text="❌ Отменить",
+                            callback_data=f"cancel_report:{task_report_id}"
+                        )]
+                    ])
                 )
 
             await callback.answer()
@@ -219,6 +228,37 @@ async def handle_report_text(message: Message, state: FSMContext):
             if not task_report:
                 await message.reply("❌ Ошибка сохранения отчёта")
                 await state.clear()
+                return
+
+            # BUG FIX (2026-01-21): Check if we're in editing mode
+            if state_data.get('editing_mode', False):
+                # Return to preview after editing text
+                bot_logger.info(f"📝 Editing mode: returning to preview after text update")
+
+                # Clear editing mode flag
+                await state.update_data(editing_mode=False)
+
+                # Show preview
+                from .preview import callback_preview_report
+
+                # Create a fake callback to reuse preview handler
+                fake_message = type('obj', (object,), {
+                    'edit_text': message.answer,
+                    'reply': message.reply,
+                    'answer': message.answer,
+                    'chat': message.chat,
+                    'from_user': message.from_user
+                })()
+
+                fake_callback = type('obj', (object,), {
+                    'data': f'preview_report:{task_report_id}',
+                    'from_user': message.from_user,
+                    'message': fake_message,
+                    'answer': lambda text='', show_alert=False: None
+                })()
+
+                await message.reply("✅ <b>Текст отчёта сохранён!</b>", parse_mode="HTML")
+                await callback_preview_report(fake_callback)
                 return
 
             # Move to duration collection state
