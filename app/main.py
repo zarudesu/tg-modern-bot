@@ -53,24 +53,58 @@ async def on_startup(bot: Bot):
         await webhook_server.start_server(host='0.0.0.0', port=webhook_port)
         bot_logger.info(f"✅ Webhook server started on port {webhook_port}")
 
-        # 🔥 НОВОЕ: Инициализация AI Manager (если есть API ключи)
-        ai_api_key = getattr(settings, 'openai_api_key', None)
-        if ai_api_key:
+        # 🔥 НОВОЕ: Инициализация AI Manager
+        # Приоритет: OpenRouter (бесплатные модели) > OpenAI > Anthropic
+        openrouter_key = getattr(settings, 'openrouter_api_key', None)
+        openai_key = getattr(settings, 'openai_api_key', None)
+        anthropic_key = getattr(settings, 'anthropic_api_key', None)
+
+        ai_initialized = False
+
+        # 1. Пробуем OpenRouter (бесплатные модели!)
+        if openrouter_key:
+            ai_manager.create_openrouter_provider(
+                api_key=openrouter_key,
+                model="meta-llama/llama-3.1-8b-instruct:free",  # Хороший баланс
+                set_as_default=True,
+                temperature=0.7,
+                max_tokens=1500,
+                site_name="HHIVP IT Bot"
+            )
+            bot_logger.info("✅ AI Manager initialized with OpenRouter (FREE models)")
+            ai_initialized = True
+
+        # 2. Fallback на OpenAI (если нет OpenRouter)
+        elif openai_key:
             ai_manager.create_openai_provider(
-                api_key=ai_api_key,
+                api_key=openai_key,
                 model="gpt-4-turbo",
                 set_as_default=True,
                 temperature=0.7,
                 max_tokens=2000
             )
             bot_logger.info("✅ AI Manager initialized with OpenAI")
+            ai_initialized = True
 
-            # Initialize Smart Task Detection handler
+        # 3. Fallback на Anthropic
+        elif anthropic_key:
+            ai_manager.create_anthropic_provider(
+                api_key=anthropic_key,
+                model="claude-3-haiku-20240307",  # Быстрая и дешёвая
+                set_as_default=True,
+                temperature=0.7,
+                max_tokens=2000
+            )
+            bot_logger.info("✅ AI Manager initialized with Anthropic")
+            ai_initialized = True
+
+        # Инициализация Smart Task Detection (если AI доступен)
+        if ai_initialized:
             from .modules.ai_assistant.task_suggestion_handler import init_task_suggestion_handler
             await init_task_suggestion_handler(bot)
             bot_logger.info("✅ Smart Task Detection initialized")
         else:
-            bot_logger.warning("⚠️ AI features disabled: No API key found")
+            bot_logger.warning("⚠️ AI features disabled: No API key found (OpenRouter/OpenAI/Anthropic)")
         
         # Инициализация сервиса ежедневных задач
         from .services.daily_tasks_service import DailyTasksService

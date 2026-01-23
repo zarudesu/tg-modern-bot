@@ -7,6 +7,7 @@ from enum import Enum
 from .base import AIProvider, AIMessage, AIResponse, AIConfig
 from .openai_provider import OpenAIProvider
 from .anthropic_provider import AnthropicProvider
+from .openrouter_provider import OpenRouterProvider, FREE_MODELS, RECOMMENDED_MODELS
 from ...utils.logger import bot_logger
 
 
@@ -14,6 +15,7 @@ class AIProviderType(Enum):
     """Типы AI провайдеров"""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    OPENROUTER = "openrouter"
     CUSTOM = "custom"
 
 
@@ -113,6 +115,67 @@ class AIManager:
 
         self.register_provider(name, provider, set_as_default)
         return provider
+
+    def create_openrouter_provider(
+        self,
+        api_key: str,
+        model: str = None,
+        name: str = "openrouter",
+        set_as_default: bool = False,
+        site_url: str = None,
+        site_name: str = None,
+        **config_kwargs
+    ) -> OpenRouterProvider:
+        """
+        Создать и зарегистрировать OpenRouter провайдер
+
+        OpenRouter даёт доступ к множеству моделей через единый API,
+        включая бесплатные (Llama, Gemma, Mistral, Qwen).
+
+        Args:
+            api_key: OpenRouter API ключ (получить на openrouter.ai)
+            model: Модель (по умолчанию бесплатная Llama 3.2)
+            name: Имя провайдера
+            set_as_default: Установить как default
+            site_url: URL вашего сайта/приложения
+            site_name: Название приложения
+            **config_kwargs: Дополнительные параметры конфигурации
+
+        Returns:
+            Созданный OpenRouter провайдер
+        """
+        # Если модель не указана, используем бесплатную
+        if model is None:
+            model = FREE_MODELS[0]  # meta-llama/llama-3.2-3b-instruct:free
+
+        config = AIConfig(model=model, **config_kwargs)
+        provider = OpenRouterProvider(
+            api_key=api_key,
+            config=config,
+            site_url=site_url,
+            site_name=site_name
+        )
+
+        self.register_provider(name, provider, set_as_default)
+        return provider
+
+    @staticmethod
+    def get_free_models() -> list:
+        """Получить список бесплатных моделей OpenRouter"""
+        return FREE_MODELS.copy()
+
+    @staticmethod
+    def get_recommended_model(task: str) -> str:
+        """
+        Получить рекомендуемую бесплатную модель для задачи
+
+        Args:
+            task: Тип задачи (chat, task_detection, report_generation, code)
+
+        Returns:
+            Название модели OpenRouter
+        """
+        return RECOMMENDED_MODELS.get(task, RECOMMENDED_MODELS.get("chat"))
 
     def get_provider(self, name: Optional[str] = None) -> Optional[AIProvider]:
         """

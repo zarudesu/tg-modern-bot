@@ -70,7 +70,8 @@ class Settings(BaseSettings):
     # AI Configuration
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    ai_model: str = "gpt-4-turbo"  # Default AI model
+    openrouter_api_key: Optional[str] = None  # OpenRouter для бесплатных моделей
+    ai_model: str = "gpt-4-turbo"  # Default AI model (fallback)
     ai_temperature: float = 0.7
     ai_max_tokens: int = 2000
 
