@@ -424,13 +424,23 @@ class WebhookServer:
             signature = request.headers.get('X-Plane-Signature')
 
             if webhook_secret and signature:
-                raw_body = await request.read()
-                if not self._verify_signature(raw_body.decode(), signature, webhook_secret):
+                # Plane signs json.dumps(payload), not raw body!
+                # See: https://developers.plane.so/dev-tools/intro-webhooks
+                data = await request.json()
+                # Recreate the signed payload as Plane does
+                payload_to_verify = json.dumps(data)
+                expected_signature = hmac.new(
+                    webhook_secret.encode('utf-8'),
+                    payload_to_verify.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+
+                if not hmac.compare_digest(expected_signature, signature):
                     bot_logger.warning(
-                        f"❌ Invalid Plane signature from {request.remote}"
+                        f"❌ Invalid Plane signature from {request.remote}. "
+                        f"Expected: {expected_signature[:16]}..., Got: {signature[:16]}..."
                     )
                     return web.json_response({'error': 'Invalid signature'}, status=401)
-                data = json.loads(raw_body)
                 bot_logger.debug("✅ Plane signature verified")
             elif webhook_secret and not signature:
                 bot_logger.warning("⚠️ Plane webhook without signature (secret configured)")
