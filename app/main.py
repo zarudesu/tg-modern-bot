@@ -64,6 +64,11 @@ async def on_startup(bot: Bot):
                 max_tokens=2000
             )
             bot_logger.info("✅ AI Manager initialized with OpenAI")
+
+            # Initialize Smart Task Detection handler
+            from .modules.ai_assistant.task_suggestion_handler import init_task_suggestion_handler
+            await init_task_suggestion_handler(bot)
+            bot_logger.info("✅ Smart Task Detection initialized")
         else:
             bot_logger.warning("⚠️ AI features disabled: No API key found")
         

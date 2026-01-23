@@ -194,11 +194,22 @@ class N8nIntegrationService:
 - **Description:** AI analyzes group messages, suggests task creation
 - **Flow:**
   ```
-  Message in group → AI analyzes intent →
-  If task-like → Suggest /task command with pre-filled data
+  Message in group → Chat Monitor captures → AI analyzes intent →
+  If task-like (confidence > 75%) → Show suggestion with "Create task" button →
+  User clicks → Task created in Plane automatically
   ```
-- **Dependencies:** AI Assistant module, Chat Monitor
-- **Status:** [ ] Spec needed
+- **Dependencies:** AI Assistant module, Chat Monitor, Event Bus
+- **Status:** [x] IMPLEMENTED (2026-01-23)
+- **Files:**
+  - `app/modules/ai_assistant/ai_handlers.py` - AutoTaskDetectionHandler
+  - `app/modules/ai_assistant/task_suggestion_handler.py` - Notification sender
+  - `app/modules/ai_assistant/smart_task_callbacks.py` - Button callbacks
+- **Features:**
+  - Keyword-based pre-filter (нужно, надо, сделать, etc.)
+  - AI confidence scoring
+  - Rate limiting (30 sec between suggestions)
+  - One-click task creation in Plane
+  - Ignore button to dismiss suggestions
 
 ---
 
@@ -352,7 +363,7 @@ make typecheck
    - [x] Issue #9: Rate limiting (already implemented)
    - [x] Issue #10: DB pool size
    - [ ] Issue #6: DI (deferred - low priority)
-9. [x] Phase 3: New Features - IN PROGRESS
+9. [x] Phase 3: New Features - COMPLETED 2026-01-23
    - [x] Voice Message Processing - DONE 2026-01-23
    - [x] AI Report Generation - DONE 2026-01-23
-   - [ ] Smart Task Detection
+   - [x] Smart Task Detection - DONE 2026-01-23

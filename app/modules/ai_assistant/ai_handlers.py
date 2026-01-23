@@ -77,6 +77,20 @@ class AutoTaskDetectionHandler(EventHandler):
                 result = json.loads(response.content)
 
                 if result.get("is_task") and result.get("confidence", 0) > 0.7:
+                    # Store detected task for callback handling
+                    from .task_suggestion_handler import store_detected_task
+                    store_detected_task(
+                        chat_id=event.chat_id,
+                        message_id=message.message_id,
+                        task_data={
+                            "detected_task": result["task_description"],
+                            "confidence": result["confidence"],
+                            "suggested_assignee": result.get("suggested_assignee"),
+                            "original_text": text,
+                            "user_id": event.user_id
+                        }
+                    )
+
                     # Публикуем событие автоматического обнаружения задачи
                     auto_task_event = AutoTaskDetectedEvent(
                         chat_id=event.chat_id,
