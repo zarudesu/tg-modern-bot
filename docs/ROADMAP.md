@@ -108,7 +108,7 @@ class N8nIntegrationService:
 ## 🟠 Architecture Improvements (Phase 2)
 
 **Priority:** 1-2 weeks after Phase 1
-**Status:** PLANNING
+**Status:** ✅ COMPLETED (2026-01-23)
 
 ### Issue #6: Dependency Injection
 - **Problem:** Global singletons (`daily_tasks_service = None`)
@@ -119,31 +119,36 @@ class N8nIntegrationService:
   - `app/services/task_reports_service.py`
   - `app/services/support_requests_service.py`
   - `app/main.py`
-- **Status:** [ ] Not started
+- **Status:** [ ] DEFERRED - Low priority, current singleton pattern works
 
 ### Issue #7: Hardcoded Telegram Mappings
 - **File:** `app/services/task_reports_service.py:28-100`
 - **Problem:** 50+ Telegram IDs in source code
 - **Solution:** Move to database table `plane_telegram_mappings`
 - **Migration needed:** Yes
-- **Status:** [ ] Not started
+- **Status:** [x] COMPLETED (2026-01-23)
+  - Migration 008: Added short_name, group_handle columns
+  - Seeded 37 companies, 15 telegram mappings
+  - All utils.py functions now use async DB lookups
+  - Admin commands: /list_members, /add_member, /list_companies, /add_company
+  - Plane API sync: /sync_plane
 
 ### Issue #8: N+1 Query Problem
 - **Problem:** `selectinload` imported but never used
 - **Files:** All services with relationships
 - **Solution:** Add eager loading to common queries
-- **Status:** [ ] Not started
+- **Status:** [x] ALREADY FIXED (found 2026-01-20) - Batch fetch implemented
 
 ### Issue #9: Rate Limiting Implementation
 - **Problem:** Configured in `config.py` but never enforced
 - **Solution:** Add rate limiting middleware or decorators
-- **Status:** [ ] Not started
+- **Status:** [x] ALREADY IMPLEMENTED - Token bucket in `app/middleware/rate_limit.py`
 
 ### Issue #10: Database Pool Size
 - **File:** `app/database/database.py:12-20`
 - **Current:** `pool_size=5, max_overflow=10`
 - **Recommended:** `pool_size=20, max_overflow=20`
-- **Status:** [ ] Not started
+- **Status:** [x] COMPLETED (2026-01-23) - Changed to pool_size=20, max_overflow=20
 
 ---
 
@@ -156,11 +161,16 @@ class N8nIntegrationService:
 - **Description:** Transcribe voice messages via AI, create tasks/reports
 - **Flow:**
   ```
-  User sends voice → Bot sends to n8n → n8n calls Whisper API →
-  Transcription returned → Bot creates task/report
+  User sends voice → Bot downloads file → Direct Whisper API call →
+  Transcription shown → User chooses: Task / Journal / Email-task
   ```
-- **Dependencies:** OpenAI Whisper API, n8n workflow
-- **Status:** [ ] Spec needed
+- **Dependencies:** OpenAI API key (whisper-1 model)
+- **Status:** [x] IMPLEMENTED (2026-01-23)
+- **File:** `app/handlers/voice_transcription.py`
+- **Features:**
+  - Admin-only (API costs money)
+  - Russian language by default
+  - 3 action buttons after transcription
 
 ### Feature: AI Report Generation
 - **Description:** Auto-generate work reports from task data
@@ -327,5 +337,14 @@ make typecheck
 4. [x] Fix Critical Issue #4 (Google Sheets blocking) - DONE 2026-01-20
 5. [x] Fix Critical Issue #5 (aiohttp session reuse) - DONE 2026-01-20
 6. [x] Run syntax checks - DONE 2026-01-20
-7. [ ] Deploy to production
-8. [ ] Start Phase 2: Architecture Improvements
+7. [x] Deploy to production - DONE 2026-01-20
+8. [x] Phase 2: Architecture Improvements - COMPLETED 2026-01-23
+   - [x] Issue #7: Telegram mappings → DB
+   - [x] Issue #8: N+1 queries (already fixed)
+   - [x] Issue #9: Rate limiting (already implemented)
+   - [x] Issue #10: DB pool size
+   - [ ] Issue #6: DI (deferred - low priority)
+9. [x] Phase 3: New Features - IN PROGRESS
+   - [x] Voice Message Processing - DONE 2026-01-23
+   - [ ] AI Report Generation
+   - [ ] Smart Task Detection

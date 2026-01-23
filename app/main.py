@@ -254,6 +254,11 @@ async def main():
         dp.include_router(admin_mappings.router)
         bot_logger.info("✅ Admin Mappings module loaded")
 
+        # 1.6 VOICE TRANSCRIPTION - Whisper API
+        from .handlers import voice_transcription
+        dp.include_router(voice_transcription.router)
+        bot_logger.info("✅ Voice Transcription module loaded")
+
         # 2. DAILY TASKS - НОВЫЕ МОДУЛИ с приоритетным email фильтром
         from .modules.daily_tasks.router import router as daily_tasks_router
         dp.include_router(daily_tasks_router)
