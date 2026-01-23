@@ -612,8 +612,11 @@ class WebhookServer:
             hashlib.sha256
         ).hexdigest()
 
-        # Проверяем подпись
-        return hmac.compare_digest(f"sha256={expected_signature}", signature)
+        # Plane sends just hex, n8n sends sha256=hex - check both formats
+        return (
+            hmac.compare_digest(expected_signature, signature) or
+            hmac.compare_digest(f"sha256={expected_signature}", signature)
+        )
     
     async def start_server(self, host: str = '0.0.0.0', port: int = 8080):
         """Запуск webhook сервера"""
