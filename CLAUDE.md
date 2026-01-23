@@ -382,42 +382,53 @@ Bot: ✅ Задача создана в Plane (автор: User A, создал:
 
 ---
 
-## 🔗 n8n Integration Plans
+## 🔗 n8n Integration
 
-### Current Integrations (Production)
+### n8n Access
+- **URL:** https://n8n.hhivp.com
+- **API:** `curl -H "X-N8N-API-KEY: $N8N_API_KEY" https://n8n.hhivp.com/api/v1/workflows`
+- **API Key:** In `.env` as `N8N_API_KEY` (JWT token)
 
-| Workflow | Webhook | Description |
-|----------|---------|-------------|
-| Task Completed | `POST /webhooks/task-completed` | Plane.so → Bot notification |
-| Work Journal Sync | n8n → Google Sheets | Journal entries sync |
-| Task Reports Sync | n8n → Google Sheets | Reports sync |
+### Active Workflows (Production)
 
-### Planned Integrations
+| ID | Workflow | Для бота? | Описание |
+|----|----------|-----------|----------|
+| `lrn3RNMYCeJlvad9` | **TG bot → Google Sheets** | ✅ ДА | Bot отправляет task reports → n8n → Google Sheets |
+| `FJLZaE4hG0JoFH6f` | Plane → Bot (prod) | ❌ УБРАТЬ | Заменить на прямой Plane webhook |
+| `Y4fnJHlMGpABXCtq` | Plane → TG + Email | Нет | Уведомления о Plane событиях (отдельный TG) |
+| `oebEvIxXE5yen48K` | ticket@hhivp.com → Plane | Нет | Email → Plane задача → Auto-reply |
+| `avIhdXufIxxjjplg` | hhivp.com Contact Form | Нет | Контактная форма сайта |
+| `t60PCfBbmkU9hp2Z` | Gomanic.ru | Нет | Другой проект |
+| `HPVA6mjD0HPWMf71` | Gomanic.com.br | Нет | Другой проект |
 
-#### Voice Transcription (Phase 3)
+### Интеграции бота с n8n
+
+**1. Google Sheets Sync (НУЖЕН n8n)**
 ```
-User voice message → Bot → n8n → OpenAI Whisper → Transcription
-Webhook: POST /webhooks/voice-transcribe
-```
-
-#### AI Report Generation (Phase 3)
-```
-Task data → n8n → OpenAI/Claude → Formatted report → Bot
-Webhook: POST /webhooks/generate-report
-```
-
-#### Daily Summary (Phase 3)
-```
-Scheduled 18:00 → n8n queries tasks → AI summary → Telegram group
-Webhook: POST /webhooks/daily-summary
+Bot создаёт TaskReport → POST n8n webhook → n8n записывает в Google Sheets
+Причина: Google Sheets API требует OAuth, проще через n8n
 ```
 
-### Webhook Security Requirements
-- All webhooks MUST verify `X-Webhook-Signature` header
-- Use `N8N_WEBHOOK_SECRET` environment variable
-- Log all calls with request ID for debugging
+**2. Plane Task Completed (УБРАТЬ n8n)**
+```
+БЫЛО:   Plane webhook → n8n → Bot
+СТАНЕТ: Plane webhook → Bot напрямую (/webhooks/plane-direct)
+Причина: n8n лишняя прослойка, добавляет баги
+```
 
-**📚 Full Integration Specs:** [`docs/ROADMAP.md#n8n-integration-plans`](docs/ROADMAP.md#-n8n-integration-plans)
+### Webhook Endpoints бота
+
+| Endpoint | Источник | Описание |
+|----------|----------|----------|
+| `POST /webhooks/task-completed` | n8n (legacy) | Task reports от n8n |
+| `POST /webhooks/plane-direct` | Plane (NEW) | Прямые webhooks от Plane |
+| `GET /health` | Any | Health check |
+
+### Planned Integrations (Phase 3)
+
+- Voice Transcription: Bot → n8n → OpenAI Whisper
+- AI Report Generation: n8n → OpenAI/Claude → Bot
+- Daily Summary: Scheduled → AI summary → TG group
 
 ---
 
@@ -813,8 +824,10 @@ git check-ignore .env SECRETS.md
 
 **n8n** (Automation & Google Sheets integration):
 - URL: https://n8n.hhivp.com
-- Credentials in `SECRETS.md`
+- API Key: In `.env` as `N8N_API_KEY` (JWT token)
+- API Docs: `https://n8n.hhivp.com/api/v1/docs`
 - Sends webhooks to: `http://rd.hhivp.com:8083/webhooks/task-completed`
+- API usage: `curl -H "X-N8N-API-KEY: $N8N_API_KEY" https://n8n.hhivp.com/api/v1/workflows`
 
 **Plane.so** (Task Management):
 - URL: https://plane.hhivp.com
