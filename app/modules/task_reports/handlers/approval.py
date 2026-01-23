@@ -526,11 +526,16 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
                 # Don't stop the process
 
             # Notify admin with main menu
+            # Add Google Sheets link if configured
+            sheets_link = ""
+            if settings.google_sheets_url:
+                sheets_link = f'\n\n<a href="{settings.google_sheets_url}">📊 Открыть журнал работ (Google Sheets)</a>'
+
             await callback.message.edit_text(
                 f"✅ <b>Отчёт одобрен!</b>\n\n"
                 f"Задача #{task_report.plane_sequence_id} завершена.\n\n"
                 f"⚠️ Отчёт не был отправлен клиенту (нет привязки).\n"
-                f"📋 Отчёт сохранён в базе данных и добавлен в журнал работ.",
+                f"📋 Отчёт сохранён в базе данных и добавлен в журнал работ.{sheets_link}",
                 reply_markup=get_back_to_main_menu_keyboard(),
                 parse_mode="HTML"
             )
