@@ -21,6 +21,7 @@ from ..database.support_requests_models import SupportRequest
 from ..database.work_journal_models import WorkJournalEntry
 from ..utils.logger import bot_logger
 from ..config import settings
+from .plane_mappings_service import PlaneMappingsService
 
 
 class TaskReportsService:
@@ -28,99 +29,47 @@ class TaskReportsService:
 
     # ═══════════════════════════════════════════════════════════
     # PLANE USER → TELEGRAM ADMIN MAPPING
+    # Now uses database via PlaneMappingsService (Issue #7)
     # ═══════════════════════════════════════════════════════════
 
-    # Static mapping: Plane display_name/email → Telegram data
-    PLANE_TO_TELEGRAM_MAP = {
-        # Zardes / Костя Макейкин / Константин Макейкин
-        "Zardes": {
-            "telegram_username": "zardes",
-            "telegram_id": 28795547
-        },
-        "Костя": {
-            "telegram_username": "zardes",
-            "telegram_id": 28795547
-        },
-        "Константин Макейкин": {
-            "telegram_username": "zardes",
-            "telegram_id": 28795547
-        },
-        "Костя Макейкин": {
-            "telegram_username": "zardes",
-            "telegram_id": 28795547
-        },
-        "zarudesu@gmail.com": {
-            "telegram_username": "zardes",
-            "telegram_id": 28795547
-        },
-
-        # Дима Гусев
-        "Дима Гусев": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "Дима": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "D. Gusev": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "Дмитрий": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "Дмитрий Гусев": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "gen.director@hhivp.com": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-        "gusev@hhivp.com": {
-            "telegram_username": "dima_gusev",
-            "telegram_id": 132228544
-        },
-
-        # Тимофей Батырев
-        "Тимофей Батырев": {
-            "telegram_username": "timofey_batyrev",
-            "telegram_id": 56994156
-        },
-        "Тимофей": {
-            "telegram_username": "timofey_batyrev",
-            "telegram_id": 56994156
-        },
-        "tim.4ud@gmail.com": {
-            "telegram_username": "timofey_batyrev",
-            "telegram_id": 56994156
-        },
-    }
-
-    def map_plane_user_to_telegram(
+    async def map_plane_user_to_telegram(
         self,
+        session: AsyncSession,
         plane_name: Optional[str] = None,
         plane_email: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Map Plane user to Telegram data
+        Map Plane user to Telegram data using database mappings.
 
         Args:
+            session: Database session
             plane_name: display_name or first_name from Plane
             plane_email: Email from Plane actor
 
         Returns:
-            Dict with telegram_username and telegram_id (or None if not found)
+            Dict with telegram_username, telegram_id, display_name (or None if not found)
         """
+        mappings_service = PlaneMappingsService(session)
+
         # Try by name first
-        if plane_name and plane_name in self.PLANE_TO_TELEGRAM_MAP:
-            return self.PLANE_TO_TELEGRAM_MAP[plane_name]
+        if plane_name:
+            info = await mappings_service.get_telegram_info(plane_name)
+            if info:
+                return {
+                    "telegram_username": info.telegram_username,
+                    "telegram_id": info.telegram_id,
+                    "display_name": info.display_name
+                }
 
         # Try by email
-        if plane_email and plane_email in self.PLANE_TO_TELEGRAM_MAP:
-            return self.PLANE_TO_TELEGRAM_MAP[plane_email]
+        if plane_email:
+            info = await mappings_service.get_telegram_info(plane_email)
+            if info:
+                return {
+                    "telegram_username": info.telegram_username,
+                    "telegram_id": info.telegram_id,
+                    "display_name": info.display_name
+                }
 
         # Not found
         bot_logger.warning(
@@ -128,7 +77,8 @@ class TaskReportsService:
         )
         return {
             "telegram_username": None,
-            "telegram_id": None
+            "telegram_id": None,
+            "display_name": plane_name  # Fallback to Plane name
         }
 
     # ═══════════════════════════════════════════════════════════
@@ -193,7 +143,7 @@ class TaskReportsService:
             plane_name = closed_by.get("display_name") or closed_by.get("first_name")
             plane_email = closed_by.get("email")
 
-            telegram_mapping = self.map_plane_user_to_telegram(plane_name, plane_email)
+            telegram_mapping = await self.map_plane_user_to_telegram(session, plane_name, plane_email)
 
             # Get support request if available
             support_request_id = webhook_data.get("support_request_id")
@@ -437,7 +387,8 @@ class TaskReportsService:
                                     email = member.get('email')
 
                                 # Map Plane user to Telegram (to get normalized names)
-                                telegram_mapping = self.map_plane_user_to_telegram(
+                                telegram_mapping = await self.map_plane_user_to_telegram(
+                                    session=session,
                                     plane_name=name,
                                     plane_email=email
                                 )
@@ -451,8 +402,9 @@ class TaskReportsService:
                         elif task_report.closed_by_plane_name:
                             bot_logger.info(f"🔄 Using closed_by as fallback: {task_report.closed_by_plane_name}")
 
-                            # Map closed_by name through PLANE_TO_TELEGRAM_MAP
-                            telegram_mapping = self.map_plane_user_to_telegram(
+                            # Map closed_by name through database mappings
+                            telegram_mapping = await self.map_plane_user_to_telegram(
+                                session=session,
                                 plane_name=task_report.closed_by_plane_name,
                                 plane_email=None  # We don't have email for closed_by
                             )
@@ -645,9 +597,10 @@ class TaskReportsService:
                             actor_email = member.get('email')
                             bot_logger.debug(f"  🔍 Resolved created_by UUID {created_by[:8]}... to {actor_name}")
 
-                # Apply PLANE_TO_TELEGRAM_MAP to normalize names (Константин Макейкин → zardes)
+                # Apply database mappings to normalize names (Константин Макейкин → zardes)
                 if actor_name:
-                    telegram_mapping = self.map_plane_user_to_telegram(
+                    telegram_mapping = await self.map_plane_user_to_telegram(
+                        session=session,
                         plane_name=actor_name,
                         plane_email=actor_email
                     )

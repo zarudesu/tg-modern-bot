@@ -14,8 +14,8 @@ engine = create_async_engine(
     echo=settings.log_level == "DEBUG",
     pool_pre_ping=True,
     pool_recycle=3600,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=20,  # Increased from 5 for better concurrency
+    max_overflow=20,  # Increased from 10
     pool_reset_on_return='commit'
 )
 
@@ -47,6 +47,7 @@ async def init_db():
         from .models import Base
         from . import daily_tasks_models  # Импортируем чтобы таблицы зарегистрировались
         from . import user_tasks_models  # Импортируем модели кэша задач
+        from . import plane_mappings_models  # Plane↔Telegram mapping tables
         
         async with engine.begin() as conn:
             # Создание всех таблиц
