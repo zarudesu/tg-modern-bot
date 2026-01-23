@@ -38,7 +38,9 @@ class PlaneTelegramMapping(Base):
     telegram_username = Column(String(255), nullable=True)
 
     # Метаданные
-    display_name = Column(String(255), nullable=True)  # Основное отображаемое имя
+    display_name = Column(String(255), nullable=True)  # Основное отображаемое имя (Константин Макейкин)
+    short_name = Column(String(100), nullable=True)    # Короткое имя для UI (Костя)
+    group_handle = Column(String(100), nullable=True)  # @handle для групповых сообщений (@gendir_hhivp)
     plane_email = Column(String(255), nullable=True)   # Email в Plane (если известен)
     is_active = Column(Boolean, default=True, nullable=False)
 

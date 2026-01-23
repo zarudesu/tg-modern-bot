@@ -22,6 +22,8 @@ class TelegramUserInfo:
     telegram_id: int
     telegram_username: Optional[str]
     display_name: Optional[str]
+    short_name: Optional[str] = None      # Короткое имя для UI (Костя)
+    group_handle: Optional[str] = None    # @handle для групповых сообщений
 
 
 @dataclass
@@ -82,7 +84,9 @@ class PlaneMappingsService:
             info = TelegramUserInfo(
                 telegram_id=mapping.telegram_id,
                 telegram_username=mapping.telegram_username,
-                display_name=mapping.display_name
+                display_name=mapping.display_name,
+                short_name=mapping.short_name,
+                group_handle=mapping.group_handle
             )
             # Добавляем в кэш
             self._telegram_cache[lookup_key] = info
@@ -95,6 +99,95 @@ class PlaneMappingsService:
         """Получить только Telegram ID по идентификатору Plane"""
         info = await self.get_telegram_info(plane_identifier)
         return info.telegram_id if info else None
+
+    async def get_by_telegram_username(self, telegram_username: str) -> Optional[TelegramUserInfo]:
+        """
+        Получить информацию по telegram username
+
+        Args:
+            telegram_username: Username в Telegram (без @)
+
+        Returns:
+            TelegramUserInfo или None
+        """
+        username = telegram_username.strip().lower().lstrip('@')
+
+        await self._ensure_cache_valid()
+
+        # Ищем в кэше по telegram_username
+        for info in self._telegram_cache.values():
+            if info.telegram_username and info.telegram_username.lower() == username:
+                return info
+
+        # Fallback: ищем в БД
+        result = await self.session.execute(
+            select(PlaneTelegramMapping)
+            .where(PlaneTelegramMapping.telegram_username.ilike(username))
+            .where(PlaneTelegramMapping.is_active == True)
+        )
+        mapping = result.scalar_one_or_none()
+
+        if mapping:
+            return TelegramUserInfo(
+                telegram_id=mapping.telegram_id,
+                telegram_username=mapping.telegram_username,
+                display_name=mapping.display_name,
+                short_name=mapping.short_name,
+                group_handle=mapping.group_handle
+            )
+
+        return None
+
+    async def get_by_telegram_id(self, telegram_id: int) -> Optional[TelegramUserInfo]:
+        """
+        Получить информацию по telegram_id
+
+        Args:
+            telegram_id: Telegram ID пользователя
+
+        Returns:
+            TelegramUserInfo или None
+        """
+        await self._ensure_cache_valid()
+
+        # Ищем в кэше
+        for info in self._telegram_cache.values():
+            if info.telegram_id == telegram_id:
+                return info
+
+        # Fallback: ищем в БД
+        result = await self.session.execute(
+            select(PlaneTelegramMapping)
+            .where(PlaneTelegramMapping.telegram_id == telegram_id)
+            .where(PlaneTelegramMapping.is_active == True)
+        )
+        mapping = result.first()
+
+        if mapping:
+            m = mapping[0]
+            return TelegramUserInfo(
+                telegram_id=m.telegram_id,
+                telegram_username=m.telegram_username,
+                display_name=m.display_name,
+                short_name=m.short_name,
+                group_handle=m.group_handle
+            )
+
+        return None
+
+    async def get_short_name(self, telegram_username: str) -> str:
+        """Получить короткое имя по username (или username если не найдено)"""
+        info = await self.get_by_telegram_username(telegram_username)
+        if info and info.short_name:
+            return info.short_name
+        return telegram_username
+
+    async def get_group_handle(self, telegram_username: str) -> str:
+        """Получить @handle для группы по username (или @username если не найдено)"""
+        info = await self.get_by_telegram_username(telegram_username)
+        if info and info.group_handle:
+            return info.group_handle
+        return f"@{telegram_username}"
 
     async def get_company_info(self, plane_project_name: str) -> Optional[CompanyInfo]:
         """
@@ -162,7 +255,9 @@ class PlaneMappingsService:
                 self._telegram_cache[m.lookup_key] = TelegramUserInfo(
                     telegram_id=m.telegram_id,
                     telegram_username=m.telegram_username,
-                    display_name=m.display_name
+                    display_name=m.display_name,
+                    short_name=m.short_name,
+                    group_handle=m.group_handle
                 )
 
             # Загружаем все company mappings

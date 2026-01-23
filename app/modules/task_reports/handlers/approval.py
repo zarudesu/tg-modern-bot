@@ -251,9 +251,9 @@ async def callback_approve_send(callback: CallbackQuery, state: FSMContext, bot:
                     except Exception as e:
                         bot_logger.warning(f"Failed to parse workers JSON: {e}")
 
-                # Map telegram usernames to display names for Google Sheets/notifications
-                from ..utils import map_workers_to_display_names_list
-                workers_display_list = map_workers_to_display_names_list(workers_list)
+                # Map telegram usernames to display names for Google Sheets/notifications (async DB)
+                from ..utils import map_workers_to_display_names_list_async
+                workers_display_list = await map_workers_to_display_names_list_async(session, workers_list)
                 bot_logger.info(f"📝 Mapped workers: {workers_list} → {workers_display_list}")
 
                 # Get user info (use Telegram API data, not DB - more up-to-date!)
@@ -430,9 +430,9 @@ async def callback_approve_only(callback: CallbackQuery, state: FSMContext):
                 except Exception as e:
                     bot_logger.warning(f"Failed to parse workers JSON: {e}")
 
-            # Map telegram usernames to display names for Google Sheets/notifications
-            from ..utils import map_workers_to_display_names_list
-            workers_display_list = map_workers_to_display_names_list(workers_list)
+            # Map telegram usernames to display names for Google Sheets/notifications (async DB)
+            from ..utils import map_workers_to_display_names_list_async
+            workers_display_list = await map_workers_to_display_names_list_async(session, workers_list)
             bot_logger.info(f"📝 Mapped workers: {workers_list} → {workers_display_list}")
 
             # Get user info (use Telegram API data, not DB - more up-to-date!)
@@ -720,9 +720,9 @@ async def callback_confirm_send_to_request_chat(callback: CallbackQuery, state: 
                 except Exception as e:
                     bot_logger.warning(f"Failed to parse workers JSON: {e}")
 
-                # Map telegram usernames to display names
-                from ..utils import map_workers_to_display_names_list
-                workers_display_list = map_workers_to_display_names_list(workers_list)
+                # Map telegram usernames to display names (async DB)
+                from ..utils import map_workers_to_display_names_list_async
+                workers_display_list = await map_workers_to_display_names_list_async(session, workers_list)
 
                 # Get user info
                 from ....database.models import BotUser
@@ -902,9 +902,9 @@ async def callback_send_to_group(callback: CallbackQuery, state: FSMContext, bot
 
             # Now create work_journal entry if required fields are present
             if task_report.company and task_report.work_duration and workers_list:
-                # Map telegram usernames to display names
-                from ..utils import map_workers_to_display_names_list
-                workers_display_list = map_workers_to_display_names_list(workers_list)
+                # Map telegram usernames to display names (async DB)
+                from ..utils import map_workers_to_display_names_list_async
+                workers_display_list = await map_workers_to_display_names_list_async(session, workers_list)
 
                 # Get user info
                 from ....database.models import BotUser

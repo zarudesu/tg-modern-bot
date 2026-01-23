@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 
 from ..states import TaskReportStates
 from ..keyboards import create_company_keyboard, create_workers_keyboard
-from ..utils import parse_report_id_safely, map_company_name
+from ..utils import parse_report_id_safely, map_company_name_async
 from ....database.database import get_async_session
 from ....services.task_reports_service import task_reports_service
 from ....services import work_journal_service
@@ -38,19 +38,19 @@ async def callback_company(callback: CallbackQuery, state: FSMContext):
         task_report_id = int(parts[1])
         selected_company = parts[2]
 
-        # BUG FIX #3: Map company name from Plane to Russian
-        company = map_company_name(selected_company)
-
-        bot_logger.info(
-            f"🔘 Admin {callback.from_user.id} selected company '{company}' "
-            f"(original: '{selected_company}') for task report #{task_report_id}"
-        )
-
-        # Save to FSM state
-        await state.update_data(company=company)
-
-        # Save to database
+        # Save to database (with company mapping inside session context)
         async for session in get_async_session():
+            # BUG FIX #3: Map company name from Plane to Russian (async DB version)
+            company = await map_company_name_async(session, selected_company)
+
+            bot_logger.info(
+                f"🔘 Admin {callback.from_user.id} selected company '{company}' "
+                f"(original: '{selected_company}') for task report #{task_report_id}"
+            )
+
+            # Save to FSM state
+            await state.update_data(company=company)
+
             await task_reports_service.update_metadata(
                 session=session,
                 task_report_id=task_report_id,

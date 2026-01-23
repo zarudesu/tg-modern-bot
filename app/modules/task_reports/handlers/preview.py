@@ -7,7 +7,7 @@ Handlers for previewing completed reports before sending
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from ..utils import parse_report_id_safely, map_workers_to_display_names
+from ..utils import parse_report_id_safely, map_workers_to_display_names_async
 from ..keyboards import create_final_review_keyboard
 from ....database.database import get_async_session
 from ....services.task_reports_service import task_reports_service
@@ -80,8 +80,8 @@ async def callback_preview_report(callback: CallbackQuery):
             if task_report.workers:
                 try:
                     workers_list = json.loads(task_report.workers)
-                    # Map telegram usernames to display names (zardes → Костя)
-                    workers_display = map_workers_to_display_names(workers_list)
+                    # Map telegram usernames to display names (zardes → Костя) via DB
+                    workers_display = await map_workers_to_display_names_async(session, workers_list)
                 except:
                     workers_display = task_report.workers
                 workers_escaped = workers_display.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')

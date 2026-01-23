@@ -276,7 +276,7 @@ class TaskReportsService:
             bot_logger.info(f"🔍 issue_details exists: {bool(issue_details)}, type: {type(issue_details)}")
             if issue_details:
                 bot_logger.info(f"🔍 issue_details keys: {list(issue_details.keys()) if isinstance(issue_details, dict) else 'NOT A DICT'}")
-                from ..modules.task_reports.utils import map_company_name
+                from ..modules.task_reports.utils import map_company_name_async
 
                 # 1. Auto-fill COMPANY from project
                 project_detail = issue_details.get('project_detail') or {}
@@ -309,8 +309,8 @@ class TaskReportsService:
                     bot_logger.info(f"🏷️ Saved project_identifier: {project_identifier}")
 
                 if project_name and not task_report.company:
-                    # Map company name using COMPANY_MAPPING
-                    mapped_company = map_company_name(project_name)
+                    # Map company name using DB (async)
+                    mapped_company = await map_company_name_async(session, project_name)
                     task_report.company = mapped_company
                     bot_logger.info(f"🏢 Auto-filled company: '{project_name}' → '{mapped_company}'")
 
