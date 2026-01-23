@@ -419,7 +419,24 @@ class WebhookServer:
         }
         """
         try:
-            data = await request.json()
+            # Verify Plane signature if secret is configured
+            webhook_secret = getattr(settings, 'plane_webhook_secret', None)
+            signature = request.headers.get('X-Plane-Signature')
+
+            if webhook_secret and signature:
+                raw_body = await request.read()
+                if not self._verify_signature(raw_body.decode(), signature, webhook_secret):
+                    bot_logger.warning(
+                        f"❌ Invalid Plane signature from {request.remote}"
+                    )
+                    return web.json_response({'error': 'Invalid signature'}, status=401)
+                data = json.loads(raw_body)
+                bot_logger.debug("✅ Plane signature verified")
+            elif webhook_secret and not signature:
+                bot_logger.warning("⚠️ Plane webhook without signature (secret configured)")
+                data = await request.json()
+            else:
+                data = await request.json()
 
             # Log incoming webhook
             event = data.get('event', 'unknown')
