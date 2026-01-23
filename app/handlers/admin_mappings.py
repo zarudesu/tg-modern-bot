@@ -18,6 +18,7 @@ from aiogram.fsm.state import State, StatesGroup
 from ..config import settings
 from ..database.database import get_async_session
 from ..services.plane_mappings_service import PlaneMappingsService
+from ..integrations.plane import plane_api
 from ..utils.logger import bot_logger
 
 
@@ -374,3 +375,127 @@ async def cmd_cancel(message: Message, state: FSMContext):
         await message.reply("❌ Операция отменена")
     else:
         await message.reply("Нечего отменять")
+
+
+# ═══════════════════════════════════════════════════════════
+# SYNC FROM PLANE API
+# ═══════════════════════════════════════════════════════════
+
+@router.message(Command("sync_plane"))
+async def cmd_sync_plane(message: Message):
+    """
+    Sync members and projects from Plane API
+
+    Discovers new workspace members and projects,
+    adds any missing mappings to database.
+    """
+    if not settings.is_admin(message.from_user.id):
+        await message.reply("⛔ Только для администраторов")
+        return
+
+    status_msg = await message.reply("🔄 <b>Синхронизация с Plane API...</b>", parse_mode="HTML")
+
+    try:
+        import aiohttp
+
+        new_members = 0
+        new_companies = 0
+        existing_members = 0
+        existing_companies = 0
+
+        async with aiohttp.ClientSession() as http_session:
+            # 1. Sync workspace members
+            await status_msg.edit_text("🔄 Загрузка участников из Plane...")
+
+            try:
+                members = await plane_api.users.get_workspace_members(http_session)
+                bot_logger.info(f"📥 Got {len(members)} members from Plane API")
+
+                async for db_session in get_async_session():
+                    service = PlaneMappingsService(db_session)
+                    existing_mappings = await service.list_telegram_mappings()
+                    existing_lookup_keys = {m.lookup_key.lower() for m in existing_mappings}
+
+                    for member in members:
+                        display_name = member.display_name or f"{member.first_name} {member.last_name}".strip()
+
+                        # Check if email already mapped
+                        if member.email.lower() not in existing_lookup_keys:
+                            # Check if display_name already mapped
+                            if display_name.lower() not in existing_lookup_keys:
+                                bot_logger.info(
+                                    f"📝 New Plane member found: {display_name} ({member.email}) "
+                                    f"- needs Telegram ID mapping"
+                                )
+                                new_members += 1
+                            else:
+                                existing_members += 1
+                        else:
+                            existing_members += 1
+
+            except Exception as e:
+                bot_logger.error(f"Error syncing members: {e}")
+                await status_msg.edit_text(f"⚠️ Ошибка загрузки участников: {e}")
+
+            # 2. Sync projects
+            await status_msg.edit_text("🔄 Загрузка проектов из Plane...")
+
+            try:
+                projects = await plane_api.projects.get_projects(http_session)
+                bot_logger.info(f"📥 Got {len(projects)} projects from Plane API")
+
+                async for db_session in get_async_session():
+                    service = PlaneMappingsService(db_session)
+                    existing_companies = await service.list_company_mappings()
+                    existing_project_names = {c.plane_project_name.lower() for c in existing_companies}
+
+                    for project in projects:
+                        project_name = project.name
+                        project_identifier = project.identifier or project_name
+
+                        # Check if project already mapped
+                        if project_name.lower() not in existing_project_names:
+                            if project_identifier.lower() not in existing_project_names:
+                                # Add new company mapping
+                                try:
+                                    await service.add_company_mapping(
+                                        plane_project_name=project_name,
+                                        display_name_ru=project_name,  # Use original name as default
+                                        display_name_en=project_name,
+                                        plane_project_id=project.id
+                                    )
+                                    bot_logger.info(f"✅ Added company mapping: {project_name}")
+                                    new_companies += 1
+                                except Exception as e:
+                                    bot_logger.warning(f"⚠️ Failed to add company {project_name}: {e}")
+                            else:
+                                existing_companies += 1
+                        else:
+                            existing_companies += 1
+
+            except Exception as e:
+                bot_logger.error(f"Error syncing projects: {e}")
+                await status_msg.edit_text(f"⚠️ Ошибка загрузки проектов: {e}")
+
+        # Final report
+        report = (
+            f"<b>✅ Синхронизация завершена</b>\n\n"
+            f"<b>Участники:</b>\n"
+            f"  Новых: {new_members}\n"
+            f"  Уже в базе: {existing_members}\n\n"
+            f"<b>Компании/Проекты:</b>\n"
+            f"  Новых: {new_companies}\n"
+            f"  Уже в базе: {existing_companies}\n\n"
+        )
+
+        if new_members > 0:
+            report += (
+                f"⚠️ <b>Внимание:</b> Найдены новые участники без Telegram ID.\n"
+                f"Используйте /add_member чтобы добавить их Telegram ID.\n"
+            )
+
+        await status_msg.edit_text(report, parse_mode="HTML")
+
+    except Exception as e:
+        bot_logger.error(f"Error in sync_plane: {e}")
+        await status_msg.edit_text(f"❌ Ошибка синхронизации: {e}")
