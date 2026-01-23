@@ -248,7 +248,12 @@ async def main():
         # 1. ОБЩИЕ КОМАНДЫ - базовая функциональность
         dp.include_router(start.router)
         bot_logger.info("✅ Common module loaded (start, help, profile)")
-        
+
+        # 1.5 ADMIN MAPPINGS - управление маппингами через команды
+        from .handlers import admin_mappings
+        dp.include_router(admin_mappings.router)
+        bot_logger.info("✅ Admin Mappings module loaded")
+
         # 2. DAILY TASKS - НОВЫЕ МОДУЛИ с приоритетным email фильтром
         from .modules.daily_tasks.router import router as daily_tasks_router
         dp.include_router(daily_tasks_router)

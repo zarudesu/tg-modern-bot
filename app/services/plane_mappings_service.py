@@ -301,6 +301,8 @@ class PlaneMappingsService:
         telegram_id: int,
         telegram_username: Optional[str] = None,
         display_name: Optional[str] = None,
+        short_name: Optional[str] = None,
+        group_handle: Optional[str] = None,
         plane_email: Optional[str] = None,
         created_by: Optional[str] = None
     ) -> PlaneTelegramMapping:
@@ -310,6 +312,8 @@ class PlaneMappingsService:
             telegram_id=telegram_id,
             telegram_username=telegram_username,
             display_name=display_name,
+            short_name=short_name,
+            group_handle=group_handle,
             plane_email=plane_email,
             created_by=created_by
         )
