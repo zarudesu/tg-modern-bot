@@ -10,6 +10,7 @@ from .handlers import (
     preview_router,
     edit_router,
     approval_router,
+    ai_generation_router,
 )
 from .metadata import (
     duration_router,
@@ -36,3 +37,4 @@ router.include_router(creation_router)      # Report creation flow
 router.include_router(preview_router)       # Report preview
 router.include_router(edit_router)          # Report editing
 router.include_router(approval_router)      # Approval, sending, rejection
+router.include_router(ai_generation_router) # AI-powered report generation

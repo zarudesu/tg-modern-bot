@@ -176,11 +176,19 @@ class N8nIntegrationService:
 - **Description:** Auto-generate work reports from task data
 - **Flow:**
   ```
-  Task completed → Collect task data + comments →
-  Send to AI for summary → Generate formatted report
+  Task completed → Preview report → Click "AI Summary" →
+  AI analyzes title + description + comments → Professional summary generated
   ```
-- **Dependencies:** OpenAI/Anthropic API
-- **Status:** [ ] Spec needed
+- **Dependencies:** OpenAI API (gpt-4-turbo)
+- **Status:** [x] IMPLEMENTED (2026-01-23)
+- **Files:**
+  - `app/services/ai_report_generator.py` - AI generation service
+  - `app/modules/task_reports/handlers/ai_generation.py` - Callback handler
+- **Features:**
+  - Uses AIManager for LLM abstraction
+  - Context-aware: analyzes task title, description, comments
+  - Russian language output
+  - Professional client-facing tone
 
 ### Feature: Smart Task Detection
 - **Description:** AI analyzes group messages, suggests task creation
@@ -346,5 +354,5 @@ make typecheck
    - [ ] Issue #6: DI (deferred - low priority)
 9. [x] Phase 3: New Features - IN PROGRESS
    - [x] Voice Message Processing - DONE 2026-01-23
-   - [ ] AI Report Generation
+   - [x] AI Report Generation - DONE 2026-01-23
    - [ ] Smart Task Detection

@@ -30,7 +30,8 @@ EMOJI = {
     'cancel': '❌',
     'check': '✅',
     'edit': '✏️',
-    'group': '💬'
+    'group': '💬',
+    'ai': '🤖'
 }
 
 
@@ -235,11 +236,15 @@ def create_final_review_keyboard(task_report_id: int, has_client: bool, has_requ
     """Клавиатура финального просмотра перед отправкой"""
     builder = InlineKeyboardBuilder()
 
-    # Кнопка редактирования
+    # Кнопка редактирования + AI генерация в один ряд
     builder.row(
         InlineKeyboardButton(
             text=f"{EMOJI['edit']} Редактировать",
             callback_data=f"edit_report:{task_report_id}"
+        ),
+        InlineKeyboardButton(
+            text=f"{EMOJI['ai']} AI Summary",
+            callback_data=f"ai_generate:{task_report_id}"
         )
     )
 
