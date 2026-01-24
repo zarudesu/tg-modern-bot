@@ -144,6 +144,7 @@ async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
             }
 
             system_prompt = f"""Extract work report data from voice transcription in Russian.
+The transcription may contain MULTIPLE work entries (different companies/tasks).
 
 IMPORTANT: Match company and worker names to these valid values:
 - Valid companies: {companies_list}
@@ -154,14 +155,22 @@ Example: "Хардслабс" → "Харц Лабз", "Серёга" → check 
 
 Respond ONLY with JSON (no markdown, no code blocks):
 {{
-  "work_duration": "Xч" (work duration as string like "2ч", "4ч", "1.5ч"),
-  "is_travel": true/false (was there a trip/visit to client site?),
-  "workers": ["Имя1", "Имя2"] (ONLY from valid workers list, or empty if no match),
-  "company": "company name" (ONLY from valid companies list, or null if no match),
-  "work_description": "brief work description in Russian"
+  "entries": [
+    {{
+      "work_duration": "Xч" (like "2ч", "4ч", "1.5ч"),
+      "is_travel": true/false,
+      "workers": ["Имя1", "Имя2"] (from valid workers list),
+      "company": "company" (from valid companies list, or null),
+      "work_description": "brief description"
+    }}
+  ]
 }}
 
-If worker/company mentioned but not in valid list, set to null/empty."""
+Rules:
+- Create SEPARATE entry for each company/task mentioned
+- If one trip covers multiple companies, create entry per company
+- Workers can be shared across entries if they worked together all day
+- If worker/company not in valid list, set to null/empty"""
 
             payload = {
                 "model": "mistralai/devstral-2512:free",
@@ -456,49 +465,61 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
         extraction = await extract_report_data_with_ai(transcription)
 
         if extraction:
+            # Получаем массив записей (новый формат)
+            entries = extraction.get('entries', [])
 
-            # Извлекаем данные по новой схеме
-            work_duration = extraction.get('work_duration', '?')
-            is_travel = extraction.get('is_travel', False)
-            workers = extraction.get('workers', [])
-            company = extraction.get('company', '?')
-            work_description = extraction.get('work_description', transcription[:200])
+            # Обратная совместимость: если старый формат (без entries)
+            if not entries and extraction.get('work_duration'):
+                entries = [extraction]
 
             # Сохраняем для дальнейшей обработки
             cache_key = f"voice_report:{message.from_user.id}:{message.message_id}"
             _transcription_cache[cache_key] = {
                 "transcription": transcription,
-                "extraction": extraction,
+                "entries": entries,
                 "status_message_id": status_msg.message_id,
                 "chat_id": message.chat.id,
                 "duration": message.voice.duration
             }
 
-            # Формируем красивый результат
-            workers_str = ", ".join(workers) if workers else "не указаны"
-            travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
+            # Формируем красивый результат для всех записей
+            entries_text = ""
+            for i, entry in enumerate(entries, 1):
+                work_duration = entry.get('work_duration', '?')
+                is_travel = entry.get('is_travel', False)
+                workers = entry.get('workers', [])
+                company = entry.get('company', '?')
+                work_description = entry.get('work_description', '')
+
+                workers_str = ", ".join(workers) if workers else "не указаны"
+                travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
+
+                entries_text += (
+                    f"\n<b>📋 Запись {i}:</b>\n"
+                    f"🏢 {company or '?'} | ⏱ {work_duration} | {travel_str}\n"
+                    f"👥 {workers_str}\n"
+                    f"📝 {work_description[:80]}{'...' if len(work_description) > 80 else ''}\n"
+                )
+
+            total_entries = len(entries)
+            header = f"🎤 <b>AI Voice Report</b> ({total_entries} {'запись' if total_entries == 1 else 'записей' if total_entries < 5 else 'записей'})\n"
 
             await status_msg.edit_text(
-                f"🎤 <b>AI Voice Report</b>\n\n"
+                f"{header}\n"
                 f"<b>📝 Транскрипция:</b>\n"
-                f"<i>{transcription[:300]}{'...' if len(transcription) > 300 else ''}</i>\n\n"
-                f"<b>📊 Извлечённые данные:</b>\n"
-                f"⏱ Длительность: {work_duration}\n"
-                f"🚗 {travel_str}\n"
-                f"👥 Исполнители: {workers_str}\n"
-                f"🏢 Компания: {company}\n"
-                f"📋 Описание: {work_description[:100]}{'...' if len(work_description) > 100 else ''}\n\n"
-                f"<i>Используйте эти данные для создания отчёта</i>",
+                f"<i>{transcription[:200]}{'...' if len(transcription) > 200 else ''}</i>\n"
+                f"{entries_text}\n"
+                f"<i>Нажмите кнопку для создания записей</i>",
                 parse_mode="HTML",
                 reply_markup=create_voice_result_keyboard(message.from_user.id, message.message_id)
             )
 
             bot_logger.info(
-                f"Voice transcribed and extracted via AI",
+                f"Voice transcribed: {total_entries} entries extracted",
                 extra={
                     "admin_id": message.from_user.id,
                     "duration": message.voice.duration,
-                    "extraction": extraction
+                    "entries_count": total_entries
                 }
             )
         else:
@@ -698,7 +719,7 @@ async def callback_voice_to_email(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("voice_to_journal:"))
 async def callback_voice_ai_to_journal(callback: CallbackQuery):
-    """Create work journal entry from AI extraction"""
+    """Create work journal entries from AI extraction (supports multiple)"""
     try:
         parts = callback.data.split(":")
         admin_id = int(parts[1])
@@ -711,30 +732,40 @@ async def callback_voice_ai_to_journal(callback: CallbackQuery):
             await callback.answer("❌ Данные истекли", show_alert=True)
             return
 
-        extraction = cached.get("extraction", {})
+        entries = cached.get("entries", [])
         transcription = cached.get("transcription", "")
 
-        # Формируем данные для журнала (новая схема)
-        work_duration = extraction.get("work_duration", "?")
-        is_travel = extraction.get("is_travel", False)
-        workers = extraction.get("workers", [])
-        company = extraction.get("company", "")
-        work_description = extraction.get("work_description", transcription[:500])
+        # Обратная совместимость
+        if not entries and cached.get("extraction"):
+            entries = [cached.get("extraction")]
 
-        # Показываем готовые данные
-        workers_str = ", ".join(workers) if workers else "не указаны"
-        travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
+        if not entries:
+            await callback.answer("❌ Нет данных для журнала", show_alert=True)
+            return
 
-        await callback.message.edit_text(
-            f"<b>📋 Данные для журнала работ:</b>\n\n"
-            f"⏱ <b>Длительность:</b> {work_duration}\n"
-            f"🚗 <b>Тип:</b> {travel_str}\n"
-            f"👥 <b>Исполнители:</b> {workers_str}\n"
-            f"🏢 <b>Компания:</b> {company or 'не указана'}\n"
-            f"📋 <b>Описание:</b> {work_description}\n\n"
-            f"<i>Используйте /journal для создания записи с этими данными</i>",
-            parse_mode="HTML"
-        )
+        # Формируем текст для всех записей
+        entries_text = f"<b>📋 Данные для журнала работ ({len(entries)} записей):</b>\n\n"
+
+        for i, entry in enumerate(entries, 1):
+            work_duration = entry.get("work_duration", "?")
+            is_travel = entry.get("is_travel", False)
+            workers = entry.get("workers", [])
+            company = entry.get("company", "")
+            work_description = entry.get("work_description", "")
+
+            workers_str = ", ".join(workers) if workers else "не указаны"
+            travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
+
+            entries_text += (
+                f"<b>Запись {i}:</b>\n"
+                f"🏢 {company or '?'} | ⏱ {work_duration} | {travel_str}\n"
+                f"👥 {workers_str}\n"
+                f"📝 {work_description[:100]}\n\n"
+            )
+
+        entries_text += "<i>Используйте /journal для создания записей</i>"
+
+        await callback.message.edit_text(entries_text, parse_mode="HTML")
 
         await callback.answer("✅ Данные готовы")
 
