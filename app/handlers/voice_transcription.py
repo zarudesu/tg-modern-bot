@@ -90,14 +90,14 @@ async def get_voice_file_url(bot: Bot, file_id: str) -> Optional[str]:
 async def get_valid_companies_and_workers() -> tuple[list[str], list[str]]:
     """Fetch valid companies and workers from database."""
     from sqlalchemy import select
-    from ..database.database import async_session
+    from ..database.database import AsyncSessionLocal
     from ..database.work_journal_models import WorkJournalCompany, WorkJournalWorker
 
     companies = []
     workers = []
 
     try:
-        async with async_session() as session:
+        async with AsyncSessionLocal() as session:
             # Get companies
             result = await session.execute(
                 select(WorkJournalCompany.name)
