@@ -229,11 +229,13 @@ async def handle_voice_message(message: Message, bot: Bot):
         # Silently ignore non-admin voice messages
         return
 
-    # Check if ANY AI is configured
+    # Check if ANY transcription API is configured
     has_n8n = bool(getattr(settings, 'n8n_url', None))
-    has_openai = bool(settings.openai_api_key)
+    has_groq = bool(getattr(settings, 'groq_api_key', None))
+    has_openai = bool(getattr(settings, 'openai_api_key', None))
+    has_whisper = has_groq or has_openai
 
-    if not has_n8n and not has_openai:
+    if not has_n8n and not has_whisper:
         await message.reply(
             "⚠️ Транскрипция голосовых сообщений недоступна.\n"
             "Настройте N8N_URL или OPENAI_API_KEY."
@@ -292,7 +294,7 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
         if not transcription:
             await status_msg.edit_text(
                 "❌ Не удалось транскрибировать.\n"
-                "Проверьте OPENAI_API_KEY в настройках."
+                "Проверьте GROQ_API_KEY или OPENAI_API_KEY в настройках."
             )
             return
 
@@ -383,7 +385,9 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
     except Exception as e:
         bot_logger.error(f"Error in AI voice report: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        # Use HTML to avoid markdown escaping issues
+        error_text = str(e).replace("<", "&lt;").replace(">", "&gt;")
+        await status_msg.edit_text(f"❌ Ошибка: {error_text}", parse_mode="HTML")
 
 
 async def handle_local_transcription(message: Message, bot: Bot, status_msg: Message = None):
@@ -433,7 +437,8 @@ async def handle_local_transcription(message: Message, bot: Bot, status_msg: Mes
 
     except Exception as e:
         bot_logger.error(f"Error handling voice message: {e}")
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        error_text = str(e).replace("<", "&lt;").replace(">", "&gt;")
+        await status_msg.edit_text(f"❌ Ошибка: {error_text}", parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("voice_task:"))
