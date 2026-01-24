@@ -106,17 +106,17 @@ async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
                 "Content-Type": "application/json"
             }
 
-            system_prompt = """Extract work report data from voice transcription.
+            system_prompt = """Extract work report data from voice transcription in Russian.
 Respond ONLY with JSON (no markdown, no code blocks):
 {
-  "duration_hours": number (work hours, 0 if not mentioned),
-  "travel_hours": number (travel time, 0 if not mentioned),
-  "workers": ["name1", "name2"] (people who did the work),
+  "work_duration": "Xч" (work duration as string like "2ч", "4ч", "1.5ч"),
+  "is_travel": true/false (was there a trip/visit to client site?),
+  "workers": ["Имя1", "Имя2"] (people who did the work, in Russian),
   "company": "company name" (or null if not mentioned),
-  "description": "brief work description"
+  "work_description": "brief work description in Russian"
 }
 
-If data not mentioned, use null or 0. Workers are people who did the work."""
+If data not mentioned, use null. Workers are people who performed the work."""
 
             payload = {
                 "model": "mistralai/devstral-2512:free",
@@ -412,12 +412,12 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
         if extraction:
 
-            # Показываем результат сразу (n8n вернул синхронно)
-            duration_h = extraction.get('duration_hours', 0)
-            travel_h = extraction.get('travel_hours', 0)
+            # Извлекаем данные по новой схеме
+            work_duration = extraction.get('work_duration', '?')
+            is_travel = extraction.get('is_travel', False)
             workers = extraction.get('workers', [])
             company = extraction.get('company', '?')
-            description = extraction.get('description', transcription[:200])
+            work_description = extraction.get('work_description', transcription[:200])
 
             # Сохраняем для дальнейшей обработки
             cache_key = f"voice_report:{message.from_user.id}:{message.message_id}"
@@ -431,17 +431,18 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
             # Формируем красивый результат
             workers_str = ", ".join(workers) if workers else "не указаны"
+            travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
 
             await status_msg.edit_text(
                 f"🎤 <b>AI Voice Report</b>\n\n"
                 f"<b>📝 Транскрипция:</b>\n"
                 f"<i>{transcription[:300]}{'...' if len(transcription) > 300 else ''}</i>\n\n"
                 f"<b>📊 Извлечённые данные:</b>\n"
-                f"⏱ Длительность: {duration_h} ч\n"
-                f"🚗 Дорога: {travel_h} ч\n"
+                f"⏱ Длительность: {work_duration}\n"
+                f"🚗 {travel_str}\n"
                 f"👥 Исполнители: {workers_str}\n"
                 f"🏢 Компания: {company}\n"
-                f"📋 Описание: {description[:100]}{'...' if len(description) > 100 else ''}\n\n"
+                f"📋 Описание: {work_description[:100]}{'...' if len(work_description) > 100 else ''}\n\n"
                 f"<i>Используйте эти данные для создания отчёта</i>",
                 parse_mode="HTML",
                 reply_markup=create_voice_result_keyboard(message.from_user.id, message.message_id)
@@ -668,23 +669,24 @@ async def callback_voice_ai_to_journal(callback: CallbackQuery):
         extraction = cached.get("extraction", {})
         transcription = cached.get("transcription", "")
 
-        # Формируем данные для журнала
-        duration_h = extraction.get("duration_hours", 0)
-        travel_h = extraction.get("travel_hours", 0)
+        # Формируем данные для журнала (новая схема)
+        work_duration = extraction.get("work_duration", "?")
+        is_travel = extraction.get("is_travel", False)
         workers = extraction.get("workers", [])
         company = extraction.get("company", "")
-        description = extraction.get("description", transcription[:500])
+        work_description = extraction.get("work_description", transcription[:500])
 
         # Показываем готовые данные
         workers_str = ", ".join(workers) if workers else "не указаны"
+        travel_str = "✅ Выезд" if is_travel else "🏠 Удалённо"
 
         await callback.message.edit_text(
             f"<b>📋 Данные для журнала работ:</b>\n\n"
-            f"⏱ <b>Длительность:</b> {duration_h} ч\n"
-            f"🚗 <b>Дорога:</b> {travel_h} ч\n"
+            f"⏱ <b>Длительность:</b> {work_duration}\n"
+            f"🚗 <b>Тип:</b> {travel_str}\n"
             f"👥 <b>Исполнители:</b> {workers_str}\n"
             f"🏢 <b>Компания:</b> {company or 'не указана'}\n"
-            f"📋 <b>Описание:</b> {description}\n\n"
+            f"📋 <b>Описание:</b> {work_description}\n\n"
             f"<i>Используйте /journal для создания записи с этими данными</i>",
             parse_mode="HTML"
         )
