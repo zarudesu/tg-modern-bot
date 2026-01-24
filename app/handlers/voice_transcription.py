@@ -237,8 +237,9 @@ async def handle_voice_message(message: Message, bot: Bot):
 
     if not has_n8n and not has_whisper:
         await message.reply(
-            "⚠️ Транскрипция голосовых сообщений недоступна.\n"
-            "Настройте N8N_URL или OPENAI_API_KEY."
+            "⚠️ Транскрипция голосовых сообщений недоступна\n"
+            "Настройте N8N_URL или GROQ_API_KEY",
+            parse_mode=None
         )
         return
 
@@ -281,7 +282,7 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
         file_path = await download_voice_file(bot, message.voice.file_id)
         if not file_path:
-            await status_msg.edit_text("❌ Не удалось скачать голосовое")
+            await status_msg.edit_text("❌ Не удалось скачать голосовое", parse_mode=None)
             return
 
         await status_msg.edit_text(
@@ -293,8 +294,9 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
         transcription = await transcribe_with_whisper(file_path)
         if not transcription:
             await status_msg.edit_text(
-                "❌ Не удалось транскрибировать.\n"
-                "Проверьте GROQ_API_KEY или OPENAI_API_KEY в настройках."
+                "❌ Не удалось транскрибировать\n"
+                "Проверьте GROQ_API_KEY или OPENAI_API_KEY в настройках",
+                parse_mode=None
             )
             return
 
@@ -395,19 +397,19 @@ async def handle_local_transcription(message: Message, bot: Bot, status_msg: Mes
     Локальная транскрипция через OpenAI Whisper (fallback).
     """
     if not status_msg:
-        status_msg = await message.reply("🎤 Транскрибирую голосовое сообщение...")
+        status_msg = await message.reply("🎤 Транскрибирую голосовое сообщение", parse_mode=None)
 
     try:
         # 1. Download voice file
         file_path = await download_voice_file(bot, message.voice.file_id)
         if not file_path:
-            await status_msg.edit_text("❌ Не удалось скачать голосовое сообщение")
+            await status_msg.edit_text("❌ Не удалось скачать голосовое сообщение", parse_mode=None)
             return
 
         # 2. Transcribe with Whisper
         transcription = await transcribe_with_whisper(file_path)
         if not transcription:
-            await status_msg.edit_text("❌ Не удалось транскрибировать сообщение")
+            await status_msg.edit_text("❌ Не удалось транскрибировать сообщение", parse_mode=None)
             return
 
         # 3. Cache transcription for later use
@@ -480,7 +482,8 @@ async def callback_voice_to_task(callback: CallbackQuery):
             )
 
         except Exception as e:
-            await callback.message.edit_text(f"❌ Ошибка: {e}")
+            error_text = str(e).replace("<", "&lt;").replace(">", "&gt;")
+            await callback.message.edit_text(f"❌ Ошибка: {error_text}", parse_mode="HTML")
 
         await callback.answer()
 
