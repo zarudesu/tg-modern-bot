@@ -89,25 +89,44 @@ async def get_voice_file_url(bot: Bot, file_id: str) -> Optional[str]:
 
 async def transcribe_with_whisper(file_path: str) -> Optional[str]:
     """
-    Transcribe audio file using OpenAI Whisper API (local fallback).
+    Transcribe audio file using Whisper API.
+
+    Supports multiple providers:
+    1. Groq (free, fast) - GROQ_API_KEY
+    2. OpenAI (paid) - OPENAI_API_KEY
 
     Returns transcription text or None on error.
     """
-    if not settings.openai_api_key:
-        bot_logger.warning("OpenAI API key not configured, cannot transcribe")
+    # Try Groq first (free), then OpenAI
+    groq_key = getattr(settings, 'groq_api_key', None)
+    openai_key = getattr(settings, 'openai_api_key', None)
+
+    if groq_key:
+        # Use Groq (free, fast)
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        api_key = groq_key
+        model = "whisper-large-v3-turbo"  # Fast & cheap
+        bot_logger.info("Using Groq Whisper for transcription")
+    elif openai_key:
+        # Fallback to OpenAI
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        api_key = openai_key
+        model = "whisper-1"
+        bot_logger.info("Using OpenAI Whisper for transcription")
+    else:
+        bot_logger.warning("No Whisper API key configured (GROQ_API_KEY or OPENAI_API_KEY)")
         return None
 
     try:
-        url = "https://api.openai.com/v1/audio/transcriptions"
         headers = {
-            "Authorization": f"Bearer {settings.openai_api_key}"
+            "Authorization": f"Bearer {api_key}"
         }
 
         async with aiohttp.ClientSession() as session:
             with open(file_path, "rb") as audio_file:
                 form = aiohttp.FormData()
                 form.add_field("file", audio_file, filename="voice.ogg")
-                form.add_field("model", "whisper-1")
+                form.add_field("model", model)
                 form.add_field("language", "ru")  # Russian by default
                 form.add_field("response_format", "text")
 
