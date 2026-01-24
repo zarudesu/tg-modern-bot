@@ -298,6 +298,11 @@ async def main():
         dp.include_router(voice_transcription.router)
         bot_logger.info("✅ Voice Transcription module loaded")
 
+        # 1.7 AI CALLBACKS - обработка кнопок AI детекции задач и голосовых отчётов
+        from .handlers import ai_callbacks
+        dp.include_router(ai_callbacks.router)
+        bot_logger.info("✅ AI Callbacks module loaded")
+
         # 2. DAILY TASKS - НОВЫЕ МОДУЛИ с приоритетным email фильтром
         from .modules.daily_tasks.router import router as daily_tasks_router
         dp.include_router(daily_tasks_router)

@@ -1,16 +1,20 @@
 """
 Мониторинг сообщений в чатах
 
-Читает все сообщения и публикует события для обработки
+Читает все сообщения и:
+1. Публикует события для Event Bus (контекст)
+2. Отправляет на AI анализ через n8n (детекция задач)
 """
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import BaseFilter
-from typing import List
+from typing import List, Optional
 
 from ...core.events.event_bus import event_bus, EventHandler, Event
 from ...core.events.events import MessageReceivedEvent
+from ...services.n8n_ai_service import n8n_ai_service
 from ...utils.logger import bot_logger
+from ...config import settings
 
 router = Router()
 
@@ -60,6 +64,38 @@ class NotInSupportRequestFilter(BaseFilter):
             return True
 
 
+async def get_chat_plane_mapping(chat_id: int) -> Optional[dict]:
+    """
+    Получить маппинг чата на проект Plane.
+
+    Returns:
+        dict с plane_project_id и plane_project_name или None
+    """
+    try:
+        from ...database.database import get_async_session
+        from ...database.chat_support_models import ChatPlaneMapping
+        from sqlalchemy import select
+
+        async for session in get_async_session():
+            result = await session.execute(
+                select(ChatPlaneMapping).where(
+                    ChatPlaneMapping.chat_id == chat_id,
+                    ChatPlaneMapping.is_active == True
+                )
+            )
+            mapping = result.scalar_one_or_none()
+
+            if mapping:
+                return {
+                    "plane_project_id": mapping.plane_project_id,
+                    "plane_project_name": mapping.plane_project_name
+                }
+            return None
+    except Exception as e:
+        bot_logger.error(f"Error getting chat-plane mapping: {e}")
+        return None
+
+
 @router.message(
     F.chat.type.in_(["group", "supergroup"]),
     ~(F.text & F.text.startswith("/")),  # Игнорируем команды
@@ -69,9 +105,11 @@ async def monitor_group_message(message: Message):
     """
     Мониторинг сообщений в группах
 
-    Читает ВСЕ сообщения в группах (кроме команд) и публикует события
+    1. Публикует событие в Event Bus (для контекста)
+    2. Отправляет на AI анализ в n8n (для детекции задач)
     """
     try:
+        # ==================== 1. EVENT BUS (контекст) ====================
         # Определяем тип сообщения
         message_type = "text"
         if message.photo:
@@ -107,6 +145,55 @@ async def monitor_group_message(message: Message):
                 "user_id": message.from_user.id
             }
         )
+
+        # ==================== 2. AI TASK DETECTION ====================
+        # Проверяем, включена ли AI детекция
+        if not getattr(settings, 'ai_task_detection_enabled', True):
+            return
+
+        # Проверяем, настроен ли n8n
+        if not getattr(settings, 'n8n_url', None):
+            return
+
+        # Только текстовые сообщения для AI анализа
+        if message_type != "text" or not message.text:
+            return
+
+        # Получаем маппинг чата на Plane проект
+        mapping = await get_chat_plane_mapping(message.chat.id)
+
+        # Если чат не замаплен на проект - пропускаем AI анализ
+        # (задачи создаются только для замапленных чатов)
+        if not mapping:
+            bot_logger.debug(
+                f"Chat {message.chat.id} not mapped to Plane project, skipping AI analysis"
+            )
+            return
+
+        # Отправляем на AI анализ
+        success, result = await n8n_ai_service.analyze_message_for_task(
+            message=message,
+            plane_project_id=mapping.get("plane_project_id"),
+            plane_project_name=mapping.get("plane_project_name")
+        )
+
+        if success:
+            bot_logger.info(
+                f"Message sent to AI for task detection",
+                extra={
+                    "chat_id": message.chat.id,
+                    "chat_title": message.chat.title,
+                    "plane_project": mapping.get("plane_project_name")
+                }
+            )
+        elif result and result.get("skipped"):
+            # Нормальный skip (rate limit, too short, etc.)
+            bot_logger.debug(f"AI analysis skipped: {result.get('skipped')}")
+        else:
+            bot_logger.warning(
+                f"Failed to send message to AI",
+                extra={"error": result}
+            )
 
     except Exception as e:
         bot_logger.error(f"Message monitoring error: {e}")

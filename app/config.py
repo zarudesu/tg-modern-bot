@@ -39,9 +39,15 @@ class Settings(BaseSettings):
     zammad_url: Optional[str] = None
     zammad_token: Optional[str] = None
     
-    # n8n Integration (for work journal)
-    n8n_webhook_url: Optional[str] = None
+    # n8n Integration (for work journal and AI)
+    n8n_url: Optional[str] = None  # Base URL: https://n8n.hhivp.com
+    n8n_webhook_url: Optional[str] = None  # Legacy: specific webhook URL
     n8n_webhook_secret: Optional[str] = None
+
+    # AI Task Detection Settings
+    ai_task_detection_enabled: bool = True  # Включить автодетект задач в чатах
+    ai_task_detection_min_confidence: int = 70  # Минимальная уверенность для автосоздания
+    ai_task_detection_rate_limit: int = 10  # Запросов на чат в минуту
     
     # Group Notifications
     work_journal_group_chat_id: Optional[int] = None

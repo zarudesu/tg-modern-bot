@@ -437,6 +437,7 @@ class TaskReportsService:
             )
 
             report_text = await self._generate_report_text(
+                session=session,
                 title=task_report.task_title,
                 description=task_report.task_description,
                 comments=comments,
@@ -468,6 +469,7 @@ class TaskReportsService:
 
     async def _generate_report_text(
         self,
+        session: AsyncSession,
         title: Optional[str],
         description: Optional[str],
         comments: List[Dict],

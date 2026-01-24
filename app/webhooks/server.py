@@ -32,6 +32,11 @@ class WebhookServer:
         self.app.router.add_post('/webhooks/task-completed', self.handle_task_completed_webhook)
         # NEW: Direct Plane webhook (no n8n middleman)
         self.app.router.add_post('/webhooks/plane-direct', self.handle_plane_direct_webhook)
+
+        # AI Integration webhooks (n8n → Bot)
+        self.app.router.add_post('/webhooks/ai/task-result', self.handle_ai_task_result)
+        self.app.router.add_post('/webhooks/ai/voice-result', self.handle_ai_voice_result)
+
         self.app.router.add_get('/health', self.health_check)
         self.app.router.add_get('/', self.root_handler)
     
@@ -50,6 +55,8 @@ class WebhookServer:
             'endpoints': [
                 '/webhooks/plane-direct - Direct Plane webhooks (RECOMMENDED)',
                 '/webhooks/task-completed - Task completion reports (legacy, from n8n)',
+                '/webhooks/ai/task-result - AI task detection results (from n8n)',
+                '/webhooks/ai/voice-result - AI voice report results (from n8n)',
                 '/health - Health check'
             ]
         })
@@ -587,6 +594,398 @@ class WebhookServer:
             import traceback
             bot_logger.error(
                 f"Error processing plane-direct webhook: {e}",
+                extra={"traceback": traceback.format_exc()}
+            )
+            return web.json_response({'error': 'Internal server error'}, status=500)
+
+    # ==================== AI INTEGRATION WEBHOOKS ====================
+
+    async def handle_ai_task_result(self, request: Request) -> Response:
+        """
+        Результат AI анализа сообщения на задачу от n8n.
+
+        n8n присылает:
+        {
+            "source": "n8n_ai",
+            "event_type": "task_detection_result",
+            "timestamp": "...",
+            "detection": {
+                "is_task": true,
+                "confidence": 85,  # 0-100%
+                "task_data": {
+                    "title": "Проверить бэкапы",
+                    "description": "...",
+                    "priority": "medium",
+                    "due_date": null
+                }
+            },
+            "original_message": {
+                "chat_id": -1001234567890,
+                "message_id": 123,
+                "text": "...",
+                "user_id": 123456,
+                "user_name": "John"
+            },
+            "plane": {
+                "project_id": "uuid",
+                "project_name": "HHIVP"
+            },
+            "action_taken": "pending_confirmation" | "auto_created" | "ignored"
+        }
+        """
+        try:
+            # Verify signature
+            webhook_secret = getattr(settings, 'n8n_webhook_secret', None)
+            signature = request.headers.get('X-Webhook-Secret')
+
+            if webhook_secret and signature:
+                if signature != webhook_secret:
+                    bot_logger.warning("Invalid AI task-result webhook signature")
+                    return web.json_response({'error': 'Invalid signature'}, status=401)
+
+            data = await request.json()
+
+            bot_logger.info(
+                f"📨 AI task-result webhook: "
+                f"is_task={data.get('detection', {}).get('is_task')}, "
+                f"confidence={data.get('detection', {}).get('confidence')}%, "
+                f"action={data.get('action_taken')}"
+            )
+
+            detection = data.get('detection', {})
+            original = data.get('original_message', {})
+            plane = data.get('plane', {})
+            action = data.get('action_taken')
+
+            # Игнорируем если не задача
+            if not detection.get('is_task'):
+                return web.json_response({'status': 'ignored', 'reason': 'Not a task'})
+
+            confidence = detection.get('confidence', 0)
+            task_data = detection.get('task_data', {})
+
+            # ==== Авто-создание (высокая уверенность >= 75%) ====
+            if action == 'auto_created':
+                # n8n уже создал задачу - отправляем уведомление
+                created_issue_id = data.get('created_issue', {}).get('id')
+                created_seq_id = data.get('created_issue', {}).get('sequence_id')
+
+                # Уведомляем в чат где было сообщение
+                chat_id = original.get('chat_id')
+                message_id = original.get('message_id')
+
+                if chat_id:
+                    try:
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text=(
+                                f"✅ <b>Задача автоматически создана</b>\n\n"
+                                f"📝 <b>{task_data.get('title', 'Без названия')}</b>\n"
+                                f"📊 Проект: {plane.get('project_name', 'N/A')}\n"
+                                f"🔢 Номер: #{created_seq_id}\n\n"
+                                f"<i>AI уверенность: {confidence}%</i>"
+                            ),
+                            reply_to_message_id=message_id,
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        bot_logger.warning(f"Failed to send auto-create notification: {e}")
+
+                return web.json_response({
+                    'status': 'processed',
+                    'action': 'auto_created',
+                    'issue_id': created_issue_id
+                })
+
+            # ==== Требуется подтверждение (средняя уверенность 50-74%) ====
+            elif action == 'pending_confirmation':
+                chat_id = original.get('chat_id')
+                message_id = original.get('message_id')
+                user_id = original.get('user_id')
+
+                if not chat_id:
+                    return web.json_response({'error': 'No chat_id'}, status=400)
+
+                # Формируем кнопки подтверждения
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                import json as json_lib
+
+                # Сохраняем данные задачи в callback_data (ограничение 64 байта)
+                # Используем кэш для больших данных
+                cache_key = f"ai_task:{chat_id}:{message_id}"
+
+                # Сохраняем в memory cache (можно заменить на Redis)
+                from ..handlers.voice_transcription import _transcription_cache
+                _transcription_cache[cache_key] = {
+                    'task_data': task_data,
+                    'plane': plane,
+                    'original': original,
+                    'confidence': confidence
+                }
+
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Создать задачу",
+                            callback_data=f"ai_confirm_task:{chat_id}:{message_id}"
+                        ),
+                        InlineKeyboardButton(
+                            text="❌ Не задача",
+                            callback_data=f"ai_reject_task:{chat_id}:{message_id}"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="✏️ Редактировать",
+                            callback_data=f"ai_edit_task:{chat_id}:{message_id}"
+                        )
+                    ]
+                ])
+
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"🤖 <b>AI обнаружил возможную задачу</b>\n\n"
+                            f"📝 <b>{task_data.get('title', 'Без названия')}</b>\n"
+                            f"📊 Проект: {plane.get('project_name', 'N/A')}\n"
+                            f"🎯 Приоритет: {task_data.get('priority', 'medium')}\n\n"
+                            f"<i>Уверенность: {confidence}%</i>\n\n"
+                            f"Создать задачу в Plane?"
+                        ),
+                        reply_to_message_id=message_id,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    bot_logger.warning(f"Failed to send confirmation request: {e}")
+
+                return web.json_response({
+                    'status': 'processed',
+                    'action': 'confirmation_sent'
+                })
+
+            # ==== Игнорируем (низкая уверенность < 50%) ====
+            else:
+                return web.json_response({'status': 'ignored', 'reason': 'Low confidence'})
+
+        except json.JSONDecodeError:
+            bot_logger.error("Invalid JSON in AI task-result webhook")
+            return web.json_response({'error': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            import traceback
+            bot_logger.error(
+                f"Error processing AI task-result webhook: {e}",
+                extra={"traceback": traceback.format_exc()}
+            )
+            return web.json_response({'error': 'Internal server error'}, status=500)
+
+    async def handle_ai_voice_result(self, request: Request) -> Response:
+        """
+        Результат обработки голосового сообщения от n8n.
+
+        n8n присылает:
+        {
+            "source": "n8n_ai",
+            "event_type": "voice_report_result",
+            "timestamp": "...",
+            "transcription": "Текст голосового сообщения",
+            "extraction": {
+                "task_found": true,
+                "task": {
+                    "plane_issue_id": "uuid",
+                    "plane_sequence_id": 123,
+                    "title": "Название задачи"
+                },
+                "duration_hours": 2.5,
+                "travel_hours": 0.5,
+                "workers": ["Имя1", "Имя2"],
+                "company": "Компания",
+                "work_description": "Что было сделано"
+            },
+            "action_taken": "report_created" | "task_not_found" | "pending_selection",
+            "admin": {
+                "telegram_id": 123456,
+                "name": "Admin Name"
+            },
+            "chat_id": 123456,
+            "original_message_id": 789
+        }
+        """
+        try:
+            # Verify signature
+            webhook_secret = getattr(settings, 'n8n_webhook_secret', None)
+            signature = request.headers.get('X-Webhook-Secret')
+
+            if webhook_secret and signature:
+                if signature != webhook_secret:
+                    bot_logger.warning("Invalid AI voice-result webhook signature")
+                    return web.json_response({'error': 'Invalid signature'}, status=401)
+
+            data = await request.json()
+
+            bot_logger.info(
+                f"📨 AI voice-result webhook: "
+                f"task_found={data.get('extraction', {}).get('task_found')}, "
+                f"action={data.get('action_taken')}"
+            )
+
+            extraction = data.get('extraction', {})
+            transcription = data.get('transcription', '')
+            action = data.get('action_taken')
+            admin = data.get('admin', {})
+            chat_id = data.get('chat_id')
+            original_message_id = data.get('original_message_id')
+
+            admin_telegram_id = admin.get('telegram_id')
+            if not admin_telegram_id:
+                return web.json_response({'error': 'No admin telegram_id'}, status=400)
+
+            # ==== Отчёт создан успешно ====
+            if action == 'report_created':
+                task = extraction.get('task', {})
+                report = data.get('report', {})
+
+                await self.bot.send_message(
+                    chat_id=admin_telegram_id,
+                    text=(
+                        f"✅ <b>Голосовой отчёт обработан</b>\n\n"
+                        f"📝 <b>Задача:</b> #{task.get('plane_sequence_id')} {task.get('title', 'N/A')}\n"
+                        f"⏱ <b>Длительность:</b> {extraction.get('duration_hours', 0)} ч\n"
+                        f"🚗 <b>Дорога:</b> {extraction.get('travel_hours', 0)} ч\n"
+                        f"👥 <b>Исполнители:</b> {', '.join(extraction.get('workers', []))}\n"
+                        f"🏢 <b>Компания:</b> {extraction.get('company', 'N/A')}\n\n"
+                        f"📋 <b>Описание работ:</b>\n"
+                        f"<i>{extraction.get('work_description', transcription[:200])}</i>\n\n"
+                        f"{'✅ Отчёт отправлен клиенту' if report.get('sent_to_client') else '📝 Отчёт создан (требуется отправка)'}"
+                    ),
+                    parse_mode="HTML"
+                )
+
+                return web.json_response({
+                    'status': 'processed',
+                    'action': 'report_created'
+                })
+
+            # ==== Задача не найдена - показываем поиск ====
+            elif action == 'task_not_found':
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+                # Сохраняем данные для выбора задачи
+                cache_key = f"voice_task_select:{admin_telegram_id}:{original_message_id}"
+                from ..handlers.voice_transcription import _transcription_cache
+                _transcription_cache[cache_key] = {
+                    'transcription': transcription,
+                    'extraction': extraction
+                }
+
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🔍 Найти задачу вручную",
+                            callback_data=f"voice_find_task:{admin_telegram_id}:{original_message_id}"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="📝 Создать новую задачу",
+                            callback_data=f"voice_new_task:{admin_telegram_id}:{original_message_id}"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="❌ Отмена",
+                            callback_data=f"voice_cancel:{admin_telegram_id}:{original_message_id}"
+                        )
+                    ]
+                ])
+
+                await self.bot.send_message(
+                    chat_id=admin_telegram_id,
+                    text=(
+                        f"⚠️ <b>Задача не найдена автоматически</b>\n\n"
+                        f"🎤 <b>Транскрипция:</b>\n"
+                        f"<i>{transcription[:300]}{'...' if len(transcription) > 300 else ''}</i>\n\n"
+                        f"📊 <b>Извлечённые данные:</b>\n"
+                        f"⏱ Длительность: {extraction.get('duration_hours', '?')} ч\n"
+                        f"👥 Исполнители: {', '.join(extraction.get('workers', ['?']))}\n"
+                        f"🏢 Компания: {extraction.get('company', '?')}\n\n"
+                        f"Выберите действие:"
+                    ),
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+
+                return web.json_response({
+                    'status': 'processed',
+                    'action': 'selection_requested'
+                })
+
+            # ==== Несколько задач найдено - выбор ====
+            elif action == 'pending_selection':
+                candidates = data.get('task_candidates', [])
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+                # Сохраняем данные
+                cache_key = f"voice_task_select:{admin_telegram_id}:{original_message_id}"
+                from ..handlers.voice_transcription import _transcription_cache
+                _transcription_cache[cache_key] = {
+                    'transcription': transcription,
+                    'extraction': extraction,
+                    'candidates': candidates
+                }
+
+                # Создаём кнопки для каждой задачи-кандидата
+                buttons = []
+                for i, candidate in enumerate(candidates[:5]):  # Максимум 5 кандидатов
+                    buttons.append([
+                        InlineKeyboardButton(
+                            text=f"#{candidate.get('sequence_id')} {candidate.get('title', 'N/A')[:30]}",
+                            callback_data=f"voice_select:{admin_telegram_id}:{original_message_id}:{i}"
+                        )
+                    ])
+
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="🔍 Другая задача",
+                        callback_data=f"voice_find_task:{admin_telegram_id}:{original_message_id}"
+                    )
+                ])
+                buttons.append([
+                    InlineKeyboardButton(
+                        text="❌ Отмена",
+                        callback_data=f"voice_cancel:{admin_telegram_id}:{original_message_id}"
+                    )
+                ])
+
+                keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+                await self.bot.send_message(
+                    chat_id=admin_telegram_id,
+                    text=(
+                        f"🔍 <b>Найдено несколько задач</b>\n\n"
+                        f"🎤 <b>Транскрипция:</b>\n"
+                        f"<i>{transcription[:200]}{'...' if len(transcription) > 200 else ''}</i>\n\n"
+                        f"Выберите задачу для отчёта:"
+                    ),
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+
+                return web.json_response({
+                    'status': 'processed',
+                    'action': 'selection_requested'
+                })
+
+            return web.json_response({'status': 'ignored', 'reason': 'Unknown action'})
+
+        except json.JSONDecodeError:
+            bot_logger.error("Invalid JSON in AI voice-result webhook")
+            return web.json_response({'error': 'Invalid JSON'}, status=400)
+        except Exception as e:
+            import traceback
+            bot_logger.error(
+                f"Error processing AI voice-result webhook: {e}",
                 extra={"traceback": traceback.format_exc()}
             )
             return web.json_response({'error': 'Internal server error'}, status=500)

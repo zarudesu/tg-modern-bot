@@ -1,8 +1,16 @@
 """
 Voice Message Transcription Handler
 
-Transcribes voice messages using OpenAI Whisper API
-and offers to create tasks or journal entries.
+Два режима работы:
+
+1. ЛОКАЛЬНАЯ ТРАНСКРИПЦИЯ (если n8n не настроен):
+   - Whisper API → текст
+   - Показывает кнопки для действий
+
+2. AI VOICE REPORT (если n8n настроен):
+   - Отправляет в n8n → Whisper + AI анализ
+   - AI ищет задачу в Plane
+   - Автоматически создаёт отчёт
 """
 
 import os
@@ -15,6 +23,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from ..config import settings
 from ..utils.logger import bot_logger
+from ..services.n8n_ai_service import n8n_ai_service
 
 
 router = Router(name="voice_transcription")
@@ -58,9 +67,29 @@ async def download_voice_file(bot: Bot, file_id: str) -> Optional[str]:
         return None
 
 
+async def get_voice_file_url(bot: Bot, file_id: str) -> Optional[str]:
+    """
+    Get direct URL to voice file (for n8n to download).
+
+    Returns URL or None on error.
+    """
+    try:
+        file = await bot.get_file(file_id)
+        file_path = file.file_path
+
+        if not file_path:
+            return None
+
+        return f"https://api.telegram.org/file/bot{settings.telegram_token}/{file_path}"
+
+    except Exception as e:
+        bot_logger.error(f"Error getting voice file URL: {e}")
+        return None
+
+
 async def transcribe_with_whisper(file_path: str) -> Optional[str]:
     """
-    Transcribe audio file using OpenAI Whisper API.
+    Transcribe audio file using OpenAI Whisper API (local fallback).
 
     Returns transcription text or None on error.
     """
@@ -125,30 +154,140 @@ def create_transcription_keyboard(message_id: int, chat_id: int) -> InlineKeyboa
     ])
 
 
+def create_ai_report_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for AI Voice Report mode"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🤖 AI Отчёт (авто)",
+                callback_data="voice_ai_report"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📝 Только транскрипция",
+                callback_data="voice_simple_transcribe"
+            )
+        ]
+    ])
+
+
 @router.message(F.voice)
 async def handle_voice_message(message: Message, bot: Bot):
     """
     Handle incoming voice messages.
 
-    1. Download voice file
-    2. Transcribe with Whisper
-    3. Show transcription with action buttons
+    Режим работы зависит от настроек:
+    - Если n8n настроен: AI Voice Report (полная автоматизация)
+    - Если только OpenAI: локальная транскрипция
     """
-    # Check if OpenAI is configured
-    if not settings.openai_api_key:
-        await message.reply(
-            "⚠️ Транскрипция голосовых сообщений недоступна.\n"
-            "OpenAI API ключ не настроен."
-        )
-        return
-
-    # Only transcribe for admins (API costs money)
+    # Only process for admins (API costs money)
     if not settings.is_admin(message.from_user.id):
         # Silently ignore non-admin voice messages
         return
 
-    # Show "processing" status
-    status_msg = await message.reply("🎤 Транскрибирую голосовое сообщение...")
+    # Check if ANY AI is configured
+    has_n8n = bool(getattr(settings, 'n8n_url', None))
+    has_openai = bool(settings.openai_api_key)
+
+    if not has_n8n and not has_openai:
+        await message.reply(
+            "⚠️ Транскрипция голосовых сообщений недоступна.\n"
+            "Настройте N8N_URL или OPENAI_API_KEY."
+        )
+        return
+
+    # Если есть n8n - используем AI Voice Report
+    if has_n8n:
+        await handle_ai_voice_report(message, bot)
+    else:
+        # Fallback на локальную транскрипцию
+        await handle_local_transcription(message, bot)
+
+
+async def handle_ai_voice_report(message: Message, bot: Bot):
+    """
+    AI Voice Report - полная автоматизация через n8n.
+
+    Workflow:
+    1. Бот получает голосовое
+    2. Отправляет URL в n8n
+    3. n8n: Whisper → AI extraction → Plane search → Report
+    4. n8n шлёт результат через webhook
+    5. Бот показывает результат админу
+    """
+    status_msg = await message.reply(
+        "🎤 <b>AI Voice Report</b>\n\n"
+        "⏳ Обрабатываю голосовое сообщение...\n"
+        "• Транскрипция\n"
+        "• AI анализ\n"
+        "• Поиск задачи в Plane\n"
+        "• Создание отчёта",
+        parse_mode="HTML"
+    )
+
+    try:
+        # Получаем URL файла
+        voice_url = await get_voice_file_url(bot, message.voice.file_id)
+        if not voice_url:
+            await status_msg.edit_text("❌ Не удалось получить ссылку на голосовое")
+            return
+
+        # Отправляем в n8n
+        success, result = await n8n_ai_service.process_voice_report(
+            message=message,
+            voice_file_url=voice_url,
+            admin_telegram_id=message.from_user.id,
+            admin_name=message.from_user.full_name
+        )
+
+        if success:
+            # n8n принял запрос - результат придёт через webhook
+            await status_msg.edit_text(
+                "🎤 <b>AI Voice Report</b>\n\n"
+                "✅ Голосовое отправлено на обработку\n\n"
+                f"⏱ Длительность: {message.voice.duration} сек\n"
+                "📡 Статус: обрабатывается в n8n\n\n"
+                "<i>Результат придёт отдельным сообщением...</i>",
+                parse_mode="HTML"
+            )
+
+            # Сохраняем message_id для callback от n8n
+            cache_key = f"voice_report:{message.from_user.id}:{message.message_id}"
+            _transcription_cache[cache_key] = {
+                "status_message_id": status_msg.message_id,
+                "chat_id": message.chat.id,
+                "duration": message.voice.duration
+            }
+
+            bot_logger.info(
+                f"Voice sent to n8n for AI processing",
+                extra={
+                    "admin_id": message.from_user.id,
+                    "duration": message.voice.duration
+                }
+            )
+        else:
+            # n8n недоступен - fallback на локальную транскрипцию
+            error_msg = result.get("error", "Unknown error") if result else "No response"
+            bot_logger.warning(f"n8n AI failed, falling back to local: {error_msg}")
+
+            await status_msg.edit_text(
+                "⚠️ n8n недоступен, использую локальную транскрипцию..."
+            )
+            await handle_local_transcription(message, bot, status_msg)
+
+    except Exception as e:
+        bot_logger.error(f"Error in AI voice report: {e}")
+        await status_msg.edit_text(f"❌ Ошибка: {e}")
+
+
+async def handle_local_transcription(message: Message, bot: Bot, status_msg: Message = None):
+    """
+    Локальная транскрипция через OpenAI Whisper (fallback).
+    """
+    if not status_msg:
+        status_msg = await message.reply("🎤 Транскрибирую голосовое сообщение...")
 
     try:
         # 1. Download voice file
@@ -305,3 +444,13 @@ async def callback_voice_to_email(callback: CallbackQuery):
     except Exception as e:
         bot_logger.error(f"Error in voice_email callback: {e}")
         await callback.answer("❌ Ошибка", show_alert=True)
+
+
+def get_transcription_from_cache(cache_key: str) -> Optional[dict]:
+    """Get cached transcription data (for webhook handlers)"""
+    return _transcription_cache.get(cache_key)
+
+
+def update_transcription_cache(cache_key: str, data: dict):
+    """Update cached transcription data (for webhook handlers)"""
+    _transcription_cache[cache_key] = data

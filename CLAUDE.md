@@ -422,13 +422,48 @@ Bot создаёт TaskReport → POST n8n webhook → n8n записывает 
 |----------|----------|----------|
 | `POST /webhooks/task-completed` | n8n (legacy) | Task reports от n8n |
 | `POST /webhooks/plane-direct` | Plane (NEW) | Прямые webhooks от Plane |
+| `POST /webhooks/ai/task-result` | n8n AI | Результат детекции задачи |
+| `POST /webhooks/ai/voice-result` | n8n AI | Результат голосового отчёта |
 | `GET /health` | Any | Health check |
 
-### Planned Integrations (Phase 3)
+### AI Integration (IMPLEMENTED ✅)
 
-- Voice Transcription: Bot → n8n → OpenAI Whisper
-- AI Report Generation: n8n → OpenAI/Claude → Bot
-- Daily Summary: Scheduled → AI summary → TG group
+**Архитектура:** Бот = "thin client", вся AI логика в n8n
+
+```
+┌─────────────────┐     ┌────────────────────────────────────────┐
+│  Telegram Bot   │     │                  n8n                   │
+│                 │     │                                        │
+│ Chat Monitor ───┼────►│  AI Task Detection                    │
+│ (все сообщения) │     │  └─ OpenRouter (free Llama/Mistral)   │
+│                 │     │  └─ Plane API                         │
+│ Voice Handler ──┼────►│  AI Voice Report                      │
+│ (голосовые)     │     │  └─ Whisper transcription             │
+│                 │     │  └─ OpenRouter (extract data)         │
+│ ◄───────────────┼─────┤  └─ Plane search + update             │
+│ Callbacks       │     └────────────────────────────────────────┘
+└─────────────────┘
+```
+
+**Файлы:**
+- `app/services/n8n_ai_service.py` - отправка в n8n
+- `app/handlers/ai_callbacks.py` - обработка кнопок
+- `app/webhooks/server.py` - приём результатов
+- `n8n-workflows/` - JSON для импорта в n8n
+
+**n8n Workflows:**
+- `ai-task-detection.json` - автодетекция задач в чатах
+- `ai-voice-report.json` - обработка голосовых отчётов
+
+**Настройка:**
+```bash
+# .env
+N8N_URL=https://n8n.hhivp.com
+N8N_WEBHOOK_SECRET=your_secret
+AI_TASK_DETECTION_ENABLED=true
+```
+
+📚 Полная документация: `n8n-workflows/README.md`
 
 ---
 
@@ -1063,6 +1098,8 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 | `docs/ROADMAP.md` | Technical debt & roadmap | After completing issues |
 | `docs/guides/task-reports-guide.md` | Task Reports module | After module changes |
 | `docs/guides/support-requests-guide.md` | Support module | After module changes |
+| `docs/guides/ai-integration-guide.md` | AI через n8n (Task Detection, Voice) | After AI changes |
+| `n8n-workflows/README.md` | n8n workflows setup | After n8n changes |
 | `SECRETS.md` | Production credentials | After credential changes |
 
 ---
@@ -1074,4 +1111,6 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 📚 **See also:**
 - [docs/ROADMAP.md](docs/ROADMAP.md) - Development roadmap & technical debt
+- [docs/guides/ai-integration-guide.md](docs/guides/ai-integration-guide.md) - AI Integration (n8n + OpenRouter)
+- [n8n-workflows/README.md](n8n-workflows/README.md) - n8n Workflows setup
 - [README_DOCKER.md](README_DOCKER.md) - Docker development guide

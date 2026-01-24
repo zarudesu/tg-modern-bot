@@ -1,0 +1,473 @@
+{
+  "name": "AI Voice Report",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai/voice-report",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-voice",
+      "name": "Webhook: Voice Report",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "ai-voice-report"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.voice.file_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-voice",
+      "name": "Download Voice File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "operation": "transcribe",
+        "options": {
+          "language": "ru",
+          "temperature": 0
+        }
+      },
+      "id": "whisper-transcribe",
+      "name": "Whisper: Transcribe",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.8,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 800
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a work report extraction assistant. Extract structured data from voice transcriptions about completed work.\n\nRESPOND ONLY WITH JSON in this exact format:\n{\n  \"task_keywords\": [\"keyword1\", \"keyword2\"],\n  \"duration_hours\": 2.5,\n  \"travel_hours\": 0.5,\n  \"workers\": [\"Name1\", \"Name2\"],\n  \"company\": \"Company name or null\",\n  \"work_description\": \"What was done\",\n  \"confidence\": 0-100\n}\n\nExtraction rules:\n- duration_hours: Look for \"час\", \"часа\", \"часов\", \"минут\". Convert to decimal hours.\n- travel_hours: Look for \"дорога\", \"ехал\", \"добирался\". If not mentioned, use 0.\n- workers: Extract names of people who worked. Include the speaker if they mention \"я\".\n- company: Client/company name if mentioned.\n- task_keywords: Key terms to search for the task in Plane (2-5 words).\n- work_description: Summarize what was actually done.\n\nCommon Russian patterns:\n- \"работал 2 часа\" → duration_hours: 2\n- \"полтора часа\" → duration_hours: 1.5\n- \"40 минут\" → duration_hours: 0.67\n- \"с Петей\" → workers: [\"Петя\"]\n- \"у Ромашки\" → company: \"Ромашка\""
+            },
+            {
+              "role": "user",
+              "content": "=Extract work report data from this voice transcription:\n\n{{ $json.text }}"
+            }
+          ]
+        }
+      },
+      "id": "ai-extract",
+      "name": "AI: Extract Report Data",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [910, 300],
+      "credentials": {
+        "openRouterApi": {
+          "id": "openrouter-creds",
+          "name": "OpenRouter API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI extraction response\nconst aiResponse = $input.first().json.message.content;\nconst transcription = $('Whisper: Transcribe').first().json.text;\nconst originalData = $('Webhook: Voice Report').first().json;\n\nlet parsed;\ntry {\n  let jsonStr = aiResponse;\n  if (aiResponse.includes('```json')) {\n    jsonStr = aiResponse.split('```json')[1].split('```')[0].trim();\n  } else if (aiResponse.includes('```')) {\n    jsonStr = aiResponse.split('```')[1].split('```')[0].trim();\n  }\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  parsed = {\n    task_keywords: [],\n    duration_hours: 0,\n    travel_hours: 0,\n    workers: [],\n    company: null,\n    work_description: transcription,\n    confidence: 0\n  };\n}\n\nreturn {\n  json: {\n    transcription: transcription,\n    extraction: parsed,\n    original: originalData,\n    search_query: parsed.task_keywords ? parsed.task_keywords.join(' ') : ''\n  }\n};"
+      },
+      "id": "parse-extraction",
+      "name": "Parse Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PLANE_API_URL }}/api/v1/workspaces/{{ $env.PLANE_WORKSPACE }}/issues/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search",
+              "value": "={{ $json.search_query }}"
+            },
+            {
+              "name": "per_page",
+              "value": "5"
+            },
+            {
+              "name": "order_by",
+              "value": "-updated_at"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-plane-tasks",
+      "name": "Plane: Search Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1350, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "plane-api-creds",
+          "name": "Plane API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process search results and determine action\nconst searchResults = $input.first().json;\nconst prevData = $('Parse Extraction').first().json;\n\nlet results = [];\nif (Array.isArray(searchResults)) {\n  results = searchResults;\n} else if (searchResults.results) {\n  results = searchResults.results;\n}\n\nlet action = 'task_not_found';\nlet task = null;\nlet candidates = [];\n\nif (results.length === 1) {\n  // Exact match - use this task\n  task = {\n    plane_issue_id: results[0].id,\n    plane_sequence_id: results[0].sequence_id,\n    plane_project_id: results[0].project,\n    title: results[0].name\n  };\n  action = 'report_created';\n} else if (results.length > 1) {\n  // Multiple matches - ask user to select\n  candidates = results.slice(0, 5).map(r => ({\n    id: r.id,\n    sequence_id: r.sequence_id,\n    project_id: r.project,\n    title: r.name\n  }));\n  action = 'pending_selection';\n} else {\n  // No matches\n  action = 'task_not_found';\n}\n\nreturn {\n  json: {\n    source: 'n8n_ai',\n    event_type: 'voice_report_result',\n    timestamp: new Date().toISOString(),\n    transcription: prevData.transcription,\n    extraction: {\n      task_found: task !== null,\n      task: task,\n      duration_hours: prevData.extraction.duration_hours,\n      travel_hours: prevData.extraction.travel_hours,\n      workers: prevData.extraction.workers,\n      company: prevData.extraction.company,\n      work_description: prevData.extraction.work_description\n    },\n    task_candidates: candidates,\n    action_taken: action,\n    admin: prevData.original.admin,\n    chat_id: prevData.original.chat.id,\n    original_message_id: prevData.original.message_id\n  }\n};"
+      },
+      "id": "process-search",
+      "name": "Process Search Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1570, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-found",
+              "leftValue": "={{ $json.action_taken }}",
+              "rightValue": "report_created",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "switch-task-found",
+      "name": "Switch: Task Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1790, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.PLANE_API_URL }}/api/v1/workspaces/{{ $env.PLANE_WORKSPACE }}/projects/{{ $json.extraction.task.plane_project_id }}/issues/{{ $json.extraction.task.plane_issue_id }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"state\": \"done\"\n}",
+        "options": {}
+      },
+      "id": "mark-task-done",
+      "name": "Plane: Mark as Done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2010, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "plane-api-creds",
+          "name": "Plane API"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLANE_API_URL }}/api/v1/workspaces/{{ $env.PLANE_WORKSPACE }}/projects/{{ $json.extraction.task.plane_project_id }}/issues/{{ $json.extraction.task.plane_issue_id }}/comments/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"comment_html\": \"<p><strong>Voice Report</strong></p><p>Duration: {{ $json.extraction.duration_hours }}h</p><p>Travel: {{ $json.extraction.travel_hours }}h</p><p>Workers: {{ $json.extraction.workers.join(', ') }}</p><hr/><p>{{ $json.extraction.work_description }}</p><hr/><p><em>Transcription:</em></p><p>{{ $json.transcription }}</p>\"\n}",
+        "options": {}
+      },
+      "id": "add-comment",
+      "name": "Plane: Add Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2230, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "plane-api-creds",
+          "name": "Plane API"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add report status\nconst result = $('Process Search Results').first().json;\nresult.report = {\n  created: true,\n  sent_to_client: false  // Bot will handle client notification\n};\nreturn { json: result };"
+      },
+      "id": "finalize-report",
+      "name": "Finalize Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2450, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://rd.hhivp.com:8083/webhooks/ai/voice-result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "callback-bot-found",
+      "name": "Callback: Bot (Found)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2670, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://rd.hhivp.com:8083/webhooks/ai/voice-result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "callback-bot-notfound",
+      "name": "Callback: Bot (Not Found)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2010, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'processing', action: 'voice_report_started' }) }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2890, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Voice Report": {
+      "main": [
+        [
+          {
+            "node": "Download Voice File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Voice File": {
+      "main": [
+        [
+          {
+            "node": "Whisper: Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper: Transcribe": {
+      "main": [
+        [
+          {
+            "node": "AI: Extract Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Extract Report Data": {
+      "main": [
+        [
+          {
+            "node": "Parse Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Extraction": {
+      "main": [
+        [
+          {
+            "node": "Plane: Search Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plane: Search Tasks": {
+      "main": [
+        [
+          {
+            "node": "Process Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Search Results": {
+      "main": [
+        [
+          {
+            "node": "Switch: Task Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Task Found?": {
+      "main": [
+        [
+          {
+            "node": "Plane: Mark as Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Callback: Bot (Not Found)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plane: Mark as Done": {
+      "main": [
+        [
+          {
+            "node": "Plane: Add Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plane: Add Comment": {
+      "main": [
+        [
+          {
+            "node": "Finalize Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Report": {
+      "main": [
+        [
+          {
+            "node": "Callback: Bot (Found)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback: Bot (Found)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback: Bot (Not Found)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "AI",
+      "id": "ai-tag"
+    },
+    {
+      "name": "Voice",
+      "id": "voice-tag"
+    },
+    {
+      "name": "Telegram Bot",
+      "id": "telegram-tag"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}
