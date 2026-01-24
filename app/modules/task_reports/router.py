@@ -11,6 +11,7 @@ from .handlers import (
     edit_router,
     approval_router,
     ai_generation_router,
+    voice_fill_router,
 )
 from .metadata import (
     duration_router,
@@ -32,7 +33,10 @@ router.include_router(company_router)       # Company selection
 router.include_router(workers_router)       # Workers multi-select
 router.include_router(navigation_router)    # Back buttons and field editing
 
-# 2. Main handlers (grouped by functionality)
+# 2. Voice fill handler (must be before creation for FSM state-specific handling)
+router.include_router(voice_fill_router)    # Voice message handling in filling state
+
+# 3. Main handlers (grouped by functionality)
 router.include_router(creation_router)      # Report creation flow
 router.include_router(preview_router)       # Report preview
 router.include_router(edit_router)          # Report editing

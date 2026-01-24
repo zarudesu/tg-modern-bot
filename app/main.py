@@ -293,30 +293,31 @@ async def main():
         dp.include_router(admin_mappings.router)
         bot_logger.info("✅ Admin Mappings module loaded")
 
-        # 1.6 VOICE TRANSCRIPTION - Whisper API
-        from .handlers import voice_transcription
-        dp.include_router(voice_transcription.router)
-        bot_logger.info("✅ Voice Transcription module loaded")
-
-        # 1.7 AI CALLBACKS - обработка кнопок AI детекции задач и голосовых отчётов
-        from .handlers import ai_callbacks
-        dp.include_router(ai_callbacks.router)
-        bot_logger.info("✅ AI Callbacks module loaded")
-
         # 2. DAILY TASKS - НОВЫЕ МОДУЛИ с приоритетным email фильтром
         from .modules.daily_tasks.router import router as daily_tasks_router
         dp.include_router(daily_tasks_router)
         bot_logger.info("✅ Daily Tasks module loaded (NEW modular version with email priority)")
 
-        # 3. Task Reports module - automated client reporting (BEFORE work_journal for FSM priority)
+        # 3. Task Reports module - BEFORE voice_transcription for FSM voice handling
+        # Voice handler in task_reports uses StateFilter(filling_report) and must be matched first
         from .modules.task_reports.router import router as task_reports_router
         dp.include_router(task_reports_router)
-        bot_logger.info("✅ Task Reports module loaded (FSM-based report workflow)")
+        bot_logger.info("✅ Task Reports module loaded (FSM-based report workflow + voice fill)")
 
-        # 4. WORK JOURNAL - НОВЫЕ МОДУЛИ с фильтрами активности
+        # 3.5 VOICE TRANSCRIPTION - Whisper API (AFTER task_reports for proper FSM priority)
+        from .handlers import voice_transcription
+        dp.include_router(voice_transcription.router)
+        bot_logger.info("✅ Voice Transcription module loaded")
+
+        # 3.6 AI CALLBACKS - обработка кнопок AI детекции задач и голосовых отчётов
+        from .handlers import ai_callbacks
+        dp.include_router(ai_callbacks.router)
+        bot_logger.info("✅ AI Callbacks module loaded")
+
+        # 4. WORK JOURNAL - state-based work entries
         from .modules.work_journal.router import router as work_journal_router
         dp.include_router(work_journal_router)
-        bot_logger.info("✅ Work Journal module loaded (NEW modular version with state filters)")
+        bot_logger.info("✅ Work Journal module loaded (state-based entries)")
 
         # 5. Google Sheets Sync
         from .handlers import google_sheets_sync
@@ -328,12 +329,12 @@ async def main():
         dp.include_router(ai_assistant_router)
         bot_logger.info("✅ AI Assistant module loaded")
 
-        # 7. Chat Support module - simple request handling from groups (ПЕРЕД chat_monitor!)
+        # 7. Chat Support module - /request and /task commands
         from .modules.chat_support.router import router as chat_support_router
         dp.include_router(chat_support_router)
-        bot_logger.info("✅ Chat Support module loaded (simple /request flow)")
+        bot_logger.info("✅ Chat Support module loaded")
 
-        # 8. Chat Monitor module - чтение групповых чатов (ПОСЛЕДНИМ - ловит всё остальное)
+        # 8. Chat Monitor module - catches all remaining group messages (LAST)
         from .modules.chat_monitor.router import router as chat_monitor_router
         dp.include_router(chat_monitor_router)
         bot_logger.info("✅ Chat Monitor module loaded")
