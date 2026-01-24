@@ -360,6 +360,7 @@ def _format_voice_data_preview(voice_data: Dict, transcription: str) -> str:
         return "<b>⚠️ AI не смог извлечь структурированные данные</b>\nТекст будет использован как описание работы."
 
     lines = ["<b>📊 Извлечённые данные:</b>"]
+    warnings = []
 
     if voice_data.get("work_duration"):
         lines.append(f"⏱️ Длительность: {voice_data['work_duration']}")
@@ -369,7 +370,12 @@ def _format_voice_data_preview(voice_data: Dict, transcription: str) -> str:
         lines.append(f"🚗 Тип: {travel_str}")
 
     if voice_data.get("company"):
-        lines.append(f"🏢 Компания: {voice_data['company']}")
+        company_str = voice_data['company']
+        if voice_data.get("company_unmatched"):
+            lines.append(f"🏢 Компания: {company_str} ⚠️")
+            warnings.append(f"«{company_str}» не найдена в БД")
+        else:
+            lines.append(f"🏢 Компания: {company_str}")
 
     if voice_data.get("workers"):
         workers = voice_data["workers"]
@@ -377,13 +383,29 @@ def _format_voice_data_preview(voice_data: Dict, transcription: str) -> str:
             workers_str = ", ".join(workers)
         else:
             workers_str = str(workers)
-        lines.append(f"👥 Исполнители: {workers_str}")
+
+        # Check for unmatched workers
+        unmatched = voice_data.get("workers_unmatched", [])
+        if unmatched:
+            lines.append(f"👥 Исполнители: {workers_str} ⚠️")
+            unmatched_str = ", ".join(unmatched) if isinstance(unmatched, list) else str(unmatched)
+            warnings.append(f"«{unmatched_str}» не найдены в БД")
+        else:
+            lines.append(f"👥 Исполнители: {workers_str}")
 
     if voice_data.get("work_description"):
         desc = voice_data["work_description"][:100]
         if len(voice_data["work_description"]) > 100:
             desc += "..."
         lines.append(f"📝 Описание: {desc}")
+
+    # Add warnings if any
+    if warnings:
+        lines.append("")
+        lines.append("<b>⚠️ Предупреждения:</b>")
+        for w in warnings:
+            lines.append(f"  • {w}")
+        lines.append("<i>Можно использовать как есть или выбрать из списка позже</i>")
 
     return "\n".join(lines)
 

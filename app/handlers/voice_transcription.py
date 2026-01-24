@@ -146,7 +146,7 @@ async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
             system_prompt = f"""Extract work report data from voice transcription in Russian.
 The transcription may contain MULTIPLE work entries (different companies/tasks).
 
-IMPORTANT: Match company and worker names to these valid values:
+IMPORTANT: Try to match company and worker names to these valid values:
 - Valid companies: {companies_list}
 - Valid workers: {workers_list}
 
@@ -159,8 +159,10 @@ Respond ONLY with JSON (no markdown, no code blocks):
     {{
       "work_duration": "Xч" (like "2ч", "4ч", "1.5ч"),
       "is_travel": true/false,
-      "workers": ["Имя1", "Имя2"] (from valid workers list),
-      "company": "company" (from valid companies list, or null),
+      "workers": ["Имя1", "Имя2"],
+      "workers_unmatched": ["Имя"] (names not found in valid list),
+      "company": "company name",
+      "company_unmatched": true/false (true if not in valid list),
       "work_description": "brief description"
     }}
   ]
@@ -170,7 +172,8 @@ Rules:
 - Create SEPARATE entry for each company/task mentioned
 - If one trip covers multiple companies, create entry per company
 - Workers can be shared across entries if they worked together all day
-- If worker/company not in valid list, set to null/empty"""
+- ALWAYS return mentioned company/workers even if not in valid list
+- Set company_unmatched=true or add to workers_unmatched if not matched"""
 
             payload = {
                 "model": "mistralai/devstral-2512:free",
