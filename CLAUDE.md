@@ -250,6 +250,7 @@ curl http://localhost:8083/health  # Webhook health (bot runs on 8083)
 |--------|--------|----------|---------------|
 | **Task Reports** | ✅ PRODUCTION | `app/modules/task_reports/` | [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md) |
 | **Support Requests** | ✅ PRODUCTION | `app/modules/chat_support/` | [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md) |
+| **Voice Transcription** | ✅ PRODUCTION | `app/handlers/voice_transcription.py` | Voice → AI → Work Journal (FREE APIs) |
 | **Daily Tasks** | ✅ PRODUCTION | `app/modules/daily_tasks/` | Email → Plane.so automation |
 | **Work Journal** | ✅ PRODUCTION | `app/modules/work_journal/` | Work entries → Google Sheets |
 | **AI Assistant** | 🚧 BETA | `app/modules/ai_assistant/` | OpenAI/Anthropic integration |
@@ -347,6 +348,98 @@ Bot: ✅ Задача создана в Plane (автор: User A, создал:
 - ⚠️ No chat mappings configured yet (run `/setup_chat` first)
 
 **📚 Full Documentation:** [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md)
+
+---
+
+### Voice Transcription Module (PRODUCTION READY)
+
+**Purpose:** Voice-to-text transcription with AI extraction of work report data using FREE APIs
+
+**Quick Flow:**
+```
+Admin sends voice message → HuggingFace Whisper (FREE) → Transcription →
+OpenRouter AI (FREE) → Extract structured data → Match to DB →
+Create Work Journal entries
+```
+
+**Key Features:**
+- ✅ **FREE transcription** via HuggingFace Whisper API (no cost!)
+- ✅ **FREE AI extraction** via OpenRouter (Mistral/Llama models)
+- ✅ **Multi-entry support** - record full day report in single voice message
+- ✅ **DB matching** - AI matches companies/workers to database values
+- ✅ **Data validation** - extracted fields match WorkJournalEntry schema
+
+**How It Works:**
+
+1. **Voice → Text (HuggingFace Whisper)**
+   - Uses `openai/whisper-large-v3` model
+   - Endpoint: `https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3`
+   - Supports OGG/WAV audio formats
+   - FREE with HuggingFace API key
+
+2. **Text → Structured Data (OpenRouter AI)**
+   - Uses FREE model: `mistralai/devstral-2512:free`
+   - Extracts: work_duration, is_travel, workers, company, work_description
+   - Fetches valid values from database for matching:
+     - Companies: СофтФабрик, Харц Лабз, 3Д.РУ, Сад Здоровья, Дельта, etc.
+     - Workers: Костя, Дима, Тимофей, etc.
+
+3. **Multi-Entry Support**
+   - Single voice message can contain multiple work entries
+   - AI returns `{entries: [...]}` with array of entries
+   - Each entry displayed separately with "Create Task" button
+
+**Example Voice Message:**
+```
+"Сегодня работали с Костей у Харизмы. Настраивали камеры,
+заняло 4 часа. Потом ездили в Дельту на 2 часа чинить принтер."
+```
+
+**AI Extracts:**
+```json
+{
+  "entries": [
+    {
+      "work_duration": "4ч",
+      "is_travel": false,
+      "workers": ["Костя"],
+      "company": "Харизма",
+      "work_description": "Настройка камер видеонаблюдения"
+    },
+    {
+      "work_duration": "2ч",
+      "is_travel": true,
+      "workers": ["Костя"],
+      "company": "Дельта",
+      "work_description": "Ремонт принтера"
+    }
+  ]
+}
+```
+
+**Required Environment Variables:**
+```bash
+# HuggingFace (FREE transcription)
+HUGGINGFACE_API_KEY=hf_xxxxxxxxxxxxx
+
+# OpenRouter (FREE AI extraction)
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxx
+```
+
+**File:** `app/handlers/voice_transcription.py`
+
+**Key Functions:**
+- `transcribe_audio()` - HuggingFace Whisper transcription
+- `extract_report_data_with_ai()` - OpenRouter AI extraction
+- `get_valid_companies_and_workers()` - Fetch DB values for matching
+- `handle_voice_message()` - Main handler for voice messages
+
+**Current Status:**
+- ✅ Transcription works (HuggingFace Whisper)
+- ✅ AI extraction works (OpenRouter free model)
+- ✅ Multi-entry support implemented
+- ✅ DB matching for companies/workers
+- ⚠️ "Create Task" button not yet implemented (displays data only)
 
 ---
 
@@ -782,6 +875,17 @@ N8N_WEBHOOK_SECRET=secret_here
 GOOGLE_SHEETS_ID=spreadsheet_id_here
 ```
 
+### Optional (Voice Transcription - FREE!)
+```bash
+# HuggingFace Whisper - FREE voice-to-text
+HUGGINGFACE_API_KEY=hf_xxxxxxxxxxxxx
+
+# OpenRouter - FREE AI models (Mistral, Llama)
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxx
+```
+
+Both APIs are FREE! No cost for voice transcription and AI extraction.
+
 ### Optional (AI Features - Enterprise v3.0)
 ```bash
 OPENAI_API_KEY=sk-your-openai-key
@@ -1022,6 +1126,7 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 - [ ] Email processing (Daily Tasks)
 - [ ] Work Journal → Google Sheets
 - [ ] Task Reports → Client + Google Sheets + Group
+- [ ] Voice Transcription → AI extraction → Work Journal
 - [ ] Router isolation (no message conflicts)
 - [ ] Admin-only features (verify permissions)
 
@@ -1104,8 +1209,8 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 ---
 
-**Last Updated:** 2026-01-20
-**Bot Version:** 2.7 (Code Audit + Session Continuity)
+**Last Updated:** 2026-01-24
+**Bot Version:** 2.8 (Voice Transcription + AI Extraction)
 **Current Phase:** Phase 1 - Critical Fixes
 **Questions?** Check logs: `make bot-logs` or `./deploy.sh logs`
 
