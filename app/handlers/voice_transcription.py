@@ -87,16 +87,53 @@ async def get_voice_file_url(bot: Bot, file_id: str) -> Optional[str]:
         return None
 
 
+async def get_valid_companies_and_workers() -> tuple[list[str], list[str]]:
+    """Fetch valid companies and workers from database."""
+    from sqlalchemy import select
+    from ..database.database import async_session
+    from ..database.work_journal_models import WorkJournalCompany, WorkJournalWorker
+
+    companies = []
+    workers = []
+
+    try:
+        async with async_session() as session:
+            # Get companies
+            result = await session.execute(
+                select(WorkJournalCompany.name)
+                .where(WorkJournalCompany.is_active == True)
+                .order_by(WorkJournalCompany.display_order)
+            )
+            companies = [row[0] for row in result.fetchall()]
+
+            # Get workers
+            result = await session.execute(
+                select(WorkJournalWorker.name)
+                .where(WorkJournalWorker.is_active == True)
+                .order_by(WorkJournalWorker.display_order)
+            )
+            workers = [row[0] for row in result.fetchall()]
+    except Exception as e:
+        bot_logger.warning(f"Failed to fetch companies/workers from DB: {e}")
+
+    return companies, workers
+
+
 async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
     """
     Extract work report data from transcription using OpenRouter AI.
 
-    Returns dict with: duration_hours, travel_hours, workers, company, description
+    Matches company and worker names to database values.
     """
     openrouter_key = getattr(settings, 'openrouter_api_key', None)
     if not openrouter_key:
         bot_logger.warning("OpenRouter API key not configured")
         return None
+
+    # Get valid values from database
+    companies, workers = await get_valid_companies_and_workers()
+    companies_list = ", ".join(companies) if companies else "любая"
+    workers_list = ", ".join(workers) if workers else "любые"
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -106,17 +143,25 @@ async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
                 "Content-Type": "application/json"
             }
 
-            system_prompt = """Extract work report data from voice transcription in Russian.
+            system_prompt = f"""Extract work report data from voice transcription in Russian.
+
+IMPORTANT: Match company and worker names to these valid values:
+- Valid companies: {companies_list}
+- Valid workers: {workers_list}
+
+If mentioned name is similar but not exact, use the closest match from the list above.
+Example: "Хардслабс" → "Харц Лабз", "Серёга" → check if matches any worker.
+
 Respond ONLY with JSON (no markdown, no code blocks):
-{
+{{
   "work_duration": "Xч" (work duration as string like "2ч", "4ч", "1.5ч"),
   "is_travel": true/false (was there a trip/visit to client site?),
-  "workers": ["Имя1", "Имя2"] (people who did the work, in Russian),
-  "company": "company name" (or null if not mentioned),
+  "workers": ["Имя1", "Имя2"] (ONLY from valid workers list, or empty if no match),
+  "company": "company name" (ONLY from valid companies list, or null if no match),
   "work_description": "brief work description in Russian"
-}
+}}
 
-If data not mentioned, use null. Workers are people who performed the work."""
+If worker/company mentioned but not in valid list, set to null/empty."""
 
             payload = {
                 "model": "mistralai/devstral-2512:free",
