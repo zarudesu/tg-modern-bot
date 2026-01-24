@@ -87,6 +87,70 @@ async def get_voice_file_url(bot: Bot, file_id: str) -> Optional[str]:
         return None
 
 
+async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
+    """
+    Extract work report data from transcription using OpenRouter AI.
+
+    Returns dict with: duration_hours, travel_hours, workers, company, description
+    """
+    openrouter_key = getattr(settings, 'openrouter_api_key', None)
+    if not openrouter_key:
+        bot_logger.warning("OpenRouter API key not configured")
+        return None
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json"
+            }
+
+            system_prompt = """Extract work report data from voice transcription.
+Respond ONLY with JSON (no markdown, no code blocks):
+{
+  "duration_hours": number (work hours, 0 if not mentioned),
+  "travel_hours": number (travel time, 0 if not mentioned),
+  "workers": ["name1", "name2"] (people who did the work),
+  "company": "company name" (or null if not mentioned),
+  "description": "brief work description"
+}
+
+If data not mentioned, use null or 0. Workers are people who did the work."""
+
+            payload = {
+                "model": "mistralai/devstral-2512:free",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Extract from: {transcription}"}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 500
+            }
+
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+
+                    # Clean up markdown code blocks if present
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0]
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0]
+
+                    import json
+                    return json.loads(content.strip())
+                else:
+                    error_text = await resp.text()
+                    bot_logger.error(f"OpenRouter API error: {resp.status} - {error_text}")
+                    return None
+
+    except Exception as e:
+        bot_logger.error(f"Error extracting with OpenRouter: {e}")
+        return None
+
+
 async def transcribe_with_whisper(file_path: str) -> Optional[str]:
     """
     Transcribe audio file using Whisper API.
@@ -258,22 +322,22 @@ async def handle_voice_message(message: Message, bot: Bot):
     Handle incoming voice messages.
 
     Режим работы зависит от настроек:
-    - Если n8n настроен: AI Voice Report (полная автоматизация)
-    - Если только OpenAI: локальная транскрипция
+    - Если OpenRouter настроен: AI Voice Report (транскрипция + извлечение данных)
+    - Иначе: только транскрипция с кнопками действий
     """
     # Only process for admins (API costs money)
     if not settings.is_admin(message.from_user.id):
         # Silently ignore non-admin voice messages
         return
 
-    # Check if ANY transcription API is configured
-    has_n8n = bool(getattr(settings, 'n8n_url', None))
+    # Check if transcription APIs are configured
     has_hf = bool(getattr(settings, 'huggingface_api_key', None))
     has_groq = bool(getattr(settings, 'groq_api_key', None))
     has_openai = bool(getattr(settings, 'openai_api_key', None))
+    has_openrouter = bool(getattr(settings, 'openrouter_api_key', None))
     has_whisper = has_hf or has_groq or has_openai
 
-    if not has_n8n and not has_whisper:
+    if not has_whisper:
         await message.reply(
             "⚠️ Транскрипция голосовых недоступна\n"
             "Настройте HUGGINGFACE_API_KEY",
@@ -281,25 +345,23 @@ async def handle_voice_message(message: Message, bot: Bot):
         )
         return
 
-    # Если есть n8n - используем AI Voice Report
-    if has_n8n:
+    # Если есть OpenRouter - используем AI Voice Report с извлечением данных
+    if has_openrouter:
         await handle_ai_voice_report(message, bot)
     else:
-        # Fallback на локальную транскрипцию
+        # Только транскрипция (без AI извлечения)
         await handle_local_transcription(message, bot)
 
 
 async def handle_ai_voice_report(message: Message, bot: Bot):
     """
-    AI Voice Report - автоматизация через n8n.
+    AI Voice Report - полная автоматизация через OpenRouter.
 
     Workflow:
     1. Бот получает голосовое
-    2. Бот транскрибирует локально через Whisper
-    3. Бот отправляет транскрипцию в n8n
-    4. n8n: AI extraction (длительность, дорога, исполнители, компания)
-    5. n8n шлёт результат через webhook
-    6. Бот показывает результат админу
+    2. Транскрипция через HuggingFace/Groq/OpenAI Whisper
+    3. AI извлечение данных через OpenRouter (бесплатная модель)
+    4. Показ результата админу с кнопками действий
     """
     status_msg = await message.reply(
         "🎤 <b>AI Voice Report</b>\n\n"
@@ -341,21 +403,14 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
         await status_msg.edit_text(
             "🎤 <b>AI Voice Report</b>\n\n"
             f"✅ Транскрипция готова ({len(transcription)} симв.)\n"
-            "⏳ Отправляю на AI анализ...",
+            "⏳ AI извлекает данные (OpenRouter)...",
             parse_mode="HTML"
         )
 
-        # 2. Отправляем транскрипцию в n8n для AI extraction
-        success, result = await n8n_ai_service.process_voice_report(
-            message=message,
-            transcription=transcription,
-            admin_telegram_id=message.from_user.id,
-            admin_name=message.from_user.full_name
-        )
+        # 2. Извлекаем данные напрямую через OpenRouter (без n8n)
+        extraction = await extract_report_data_with_ai(transcription)
 
-        if success:
-            # n8n принял запрос
-            extraction = result.get('extraction', {})
+        if extraction:
 
             # Показываем результат сразу (n8n вернул синхронно)
             duration_h = extraction.get('duration_hours', 0)
@@ -401,9 +456,8 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
                 }
             )
         else:
-            # n8n недоступен - показываем только транскрипцию
-            error_msg = result.get("error", "Unknown error") if result else "No response"
-            bot_logger.warning(f"n8n AI extraction failed: {error_msg}")
+            # AI extraction не удался - показываем только транскрипцию
+            bot_logger.warning("AI extraction failed, showing plain transcription")
 
             # Сохраняем транскрипцию
             cache_key = f"{message.chat.id}:{message.message_id}"
