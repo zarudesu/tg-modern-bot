@@ -111,8 +111,20 @@ async def transcribe_with_whisper(file_path: str) -> Optional[str]:
             # Try HuggingFace first (free)
             if hf_key:
                 bot_logger.info("Using HuggingFace Whisper for transcription")
-                url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
-                headers = {"Authorization": f"Bearer {hf_key}"}
+                # New endpoint (old api-inference.huggingface.co is deprecated as of 2025)
+                url = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3"
+                # Determine content type from file extension
+                content_type = "audio/ogg"
+                if file_path.endswith(".wav"):
+                    content_type = "audio/wav"
+                elif file_path.endswith(".mp3"):
+                    content_type = "audio/mpeg"
+                elif file_path.endswith(".flac"):
+                    content_type = "audio/flac"
+                headers = {
+                    "Authorization": f"Bearer {hf_key}",
+                    "Content-Type": content_type
+                }
 
                 async with session.post(url, headers=headers, data=audio_data) as resp:
                     if resp.status == 200:
