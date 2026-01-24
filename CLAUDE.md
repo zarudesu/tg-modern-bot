@@ -272,6 +272,30 @@ Client receives + Google Sheets + Group notification
 - ✅ Company mapping (15+ companies: Plane project → Russian names)
 - ✅ Workers autofill from Plane assignees
 - ✅ Complete integration: client chat + work_journal + Google Sheets + group notification
+- ✅ **Voice Fill** - заполнение отчёта голосом с детекцией конфликтов
+
+**Voice Fill (NEW!):**
+
+Вместо ручного ввода можно отправить голосовое:
+```
+«2 часа, выезд, Дима и Костя, настроили принтер и обновили ПО»
+```
+
+**Как работает:**
+1. Admin нажимает "📝 Заполнить отчёт"
+2. Отправляет голосовое (или текст)
+3. AI извлекает: длительность, тип работы, исполнителей, описание
+4. Если данные расходятся с Plane — показывает UI для выбора
+5. Применяет данные и показывает превью
+
+**Детекция конфликтов:**
+- Сравнивает компанию из голоса vs Plane project
+- Сравнивает исполнителей из голоса vs Plane assignees
+- Если отличаются — кнопки выбора "🎤 Голос" или "✈️ Plane"
+
+**Файлы:**
+- `app/modules/task_reports/handlers/voice_fill.py` - Voice fill handler
+- `app/modules/task_reports/handlers/creation.py` - Shows voice hint
 
 **Recent Fixes:**
 - BUG #5 (2025-10-08): `approve_send` now creates work_journal + Google Sheets sync
@@ -380,9 +404,8 @@ Create Work Journal entries
 2. **Text → Structured Data (OpenRouter AI)**
    - Uses FREE model: `mistralai/devstral-2512:free`
    - Extracts: work_duration, is_travel, workers, company, work_description
-   - Fetches valid values from database for matching:
-     - Companies: СофтФабрик, Харц Лабз, 3Д.РУ, Сад Здоровья, Дельта, etc.
-     - Workers: Костя, Дима, Тимофей, etc.
+   - Fetches valid values from database for matching
+   - **Company aliases** for voice recognition (сленг → официальное название)
 
 3. **Multi-Entry Support**
    - Single voice message can contain multiple work entries
@@ -403,7 +426,7 @@ Create Work Journal entries
       "work_duration": "4ч",
       "is_travel": false,
       "workers": ["Костя"],
-      "company": "Харизма",
+      "company": "Харц Лабз",  // "харизма" → "Харц Лабз"
       "work_description": "Настройка камер видеонаблюдения"
     },
     {
@@ -416,6 +439,30 @@ Create Work Journal entries
   ]
 }
 ```
+
+**Company Aliases (voice → official name):**
+
+| Голосом | → В БД |
+|---------|--------|
+| "харизма", "хардслабс", "харц" | Харц Лабз |
+| "софтфабрик", "фабрик" | СофтФабрик |
+| "3д ру", "тридиру", "дыра" | 3Д.РУ |
+| "сад", "здоровье" | Сад Здоровья |
+| "дельта телеком" | Дельта |
+| "штифтер" | Стифтер |
+| "сосновка" | Сосновый бор |
+| "вёшки", "вешки" | Вёшки 95 |
+| "вондига" | Вондига Парк |
+| "цифра" | ЦифраЦифра |
+| "хивп", "эйчхивп" | HHIVP |
+
+**Unmatched Names:**
+
+Если компания/работник не найден в БД:
+- AI всё равно возвращает упомянутое имя
+- Добавляет флаг `company_unmatched: true` или `workers_unmatched: ["Имя"]`
+- В UI показывается ⚠️ предупреждение
+- Пользователь может использовать как есть или выбрать из списка
 
 **Required Environment Variables:**
 ```bash
@@ -439,7 +486,9 @@ OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxx
 - ✅ AI extraction works (OpenRouter free model)
 - ✅ Multi-entry support implemented
 - ✅ DB matching for companies/workers
-- ⚠️ "Create Task" button not yet implemented (displays data only)
+- ✅ Company aliases for voice recognition
+- ✅ Unmatched name warnings with preview
+- ✅ Voice Fill for TaskReports with conflict detection
 
 ---
 
@@ -1210,7 +1259,7 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 ---
 
 **Last Updated:** 2026-01-24
-**Bot Version:** 2.8 (Voice Transcription + AI Extraction)
+**Bot Version:** 2.9 (Voice Fill for TaskReports + Company Aliases)
 **Current Phase:** Phase 1 - Critical Fixes
 **Questions?** Check logs: `make bot-logs` or `./deploy.sh logs`
 
