@@ -172,6 +172,30 @@ def create_ai_report_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def create_voice_result_keyboard(admin_id: int, message_id: int) -> InlineKeyboardMarkup:
+    """Keyboard after AI extraction - options to use the data"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="📋 Создать запись в журнале",
+                callback_data=f"voice_to_journal:{admin_id}:{message_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📝 Создать отчёт по задаче",
+                callback_data=f"voice_to_report:{admin_id}:{message_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔍 Найти задачу в Plane",
+                callback_data=f"voice_find_task:{admin_id}:{message_id}"
+            )
+        ]
+    ])
+
+
 @router.message(F.voice)
 async def handle_voice_message(message: Message, bot: Bot):
     """
@@ -207,75 +231,136 @@ async def handle_voice_message(message: Message, bot: Bot):
 
 async def handle_ai_voice_report(message: Message, bot: Bot):
     """
-    AI Voice Report - полная автоматизация через n8n.
+    AI Voice Report - автоматизация через n8n.
 
     Workflow:
     1. Бот получает голосовое
-    2. Отправляет URL в n8n
-    3. n8n: Whisper → AI extraction → Plane search → Report
-    4. n8n шлёт результат через webhook
-    5. Бот показывает результат админу
+    2. Бот транскрибирует локально через Whisper
+    3. Бот отправляет транскрипцию в n8n
+    4. n8n: AI extraction (длительность, дорога, исполнители, компания)
+    5. n8n шлёт результат через webhook
+    6. Бот показывает результат админу
     """
     status_msg = await message.reply(
         "🎤 <b>AI Voice Report</b>\n\n"
         "⏳ Обрабатываю голосовое сообщение...\n"
-        "• Транскрипция\n"
-        "• AI анализ\n"
-        "• Поиск задачи в Plane\n"
-        "• Создание отчёта",
+        "• Скачивание аудио\n"
+        "• Транскрипция (Whisper)\n"
+        "• AI извлечение данных",
         parse_mode="HTML"
     )
 
     try:
-        # Получаем URL файла
-        voice_url = await get_voice_file_url(bot, message.voice.file_id)
-        if not voice_url:
-            await status_msg.edit_text("❌ Не удалось получить ссылку на голосовое")
+        # 1. Скачиваем и транскрибируем локально
+        await status_msg.edit_text(
+            "🎤 <b>AI Voice Report</b>\n\n"
+            "⏳ Скачиваю голосовое...",
+            parse_mode="HTML"
+        )
+
+        file_path = await download_voice_file(bot, message.voice.file_id)
+        if not file_path:
+            await status_msg.edit_text("❌ Не удалось скачать голосовое")
             return
 
-        # Отправляем в n8n
+        await status_msg.edit_text(
+            "🎤 <b>AI Voice Report</b>\n\n"
+            "⏳ Транскрибирую (Whisper)...",
+            parse_mode="HTML"
+        )
+
+        transcription = await transcribe_with_whisper(file_path)
+        if not transcription:
+            await status_msg.edit_text(
+                "❌ Не удалось транскрибировать.\n"
+                "Проверьте OPENAI_API_KEY в настройках."
+            )
+            return
+
+        await status_msg.edit_text(
+            "🎤 <b>AI Voice Report</b>\n\n"
+            f"✅ Транскрипция готова ({len(transcription)} симв.)\n"
+            "⏳ Отправляю на AI анализ...",
+            parse_mode="HTML"
+        )
+
+        # 2. Отправляем транскрипцию в n8n для AI extraction
         success, result = await n8n_ai_service.process_voice_report(
             message=message,
-            voice_file_url=voice_url,
+            transcription=transcription,
             admin_telegram_id=message.from_user.id,
             admin_name=message.from_user.full_name
         )
 
         if success:
-            # n8n принял запрос - результат придёт через webhook
-            await status_msg.edit_text(
-                "🎤 <b>AI Voice Report</b>\n\n"
-                "✅ Голосовое отправлено на обработку\n\n"
-                f"⏱ Длительность: {message.voice.duration} сек\n"
-                "📡 Статус: обрабатывается в n8n\n\n"
-                "<i>Результат придёт отдельным сообщением...</i>",
-                parse_mode="HTML"
-            )
+            # n8n принял запрос
+            extraction = result.get('extraction', {})
 
-            # Сохраняем message_id для callback от n8n
+            # Показываем результат сразу (n8n вернул синхронно)
+            duration_h = extraction.get('duration_hours', 0)
+            travel_h = extraction.get('travel_hours', 0)
+            workers = extraction.get('workers', [])
+            company = extraction.get('company', '?')
+            description = extraction.get('description', transcription[:200])
+
+            # Сохраняем для дальнейшей обработки
             cache_key = f"voice_report:{message.from_user.id}:{message.message_id}"
             _transcription_cache[cache_key] = {
+                "transcription": transcription,
+                "extraction": extraction,
                 "status_message_id": status_msg.message_id,
                 "chat_id": message.chat.id,
                 "duration": message.voice.duration
             }
 
+            # Формируем красивый результат
+            workers_str = ", ".join(workers) if workers else "не указаны"
+
+            await status_msg.edit_text(
+                f"🎤 <b>AI Voice Report</b>\n\n"
+                f"<b>📝 Транскрипция:</b>\n"
+                f"<i>{transcription[:300]}{'...' if len(transcription) > 300 else ''}</i>\n\n"
+                f"<b>📊 Извлечённые данные:</b>\n"
+                f"⏱ Длительность: {duration_h} ч\n"
+                f"🚗 Дорога: {travel_h} ч\n"
+                f"👥 Исполнители: {workers_str}\n"
+                f"🏢 Компания: {company}\n"
+                f"📋 Описание: {description[:100]}{'...' if len(description) > 100 else ''}\n\n"
+                f"<i>Используйте эти данные для создания отчёта</i>",
+                parse_mode="HTML",
+                reply_markup=create_voice_result_keyboard(message.from_user.id, message.message_id)
+            )
+
             bot_logger.info(
-                f"Voice sent to n8n for AI processing",
+                f"Voice transcribed and extracted via AI",
                 extra={
                     "admin_id": message.from_user.id,
-                    "duration": message.voice.duration
+                    "duration": message.voice.duration,
+                    "extraction": extraction
                 }
             )
         else:
-            # n8n недоступен - fallback на локальную транскрипцию
+            # n8n недоступен - показываем только транскрипцию
             error_msg = result.get("error", "Unknown error") if result else "No response"
-            bot_logger.warning(f"n8n AI failed, falling back to local: {error_msg}")
+            bot_logger.warning(f"n8n AI extraction failed: {error_msg}")
+
+            # Сохраняем транскрипцию
+            cache_key = f"{message.chat.id}:{message.message_id}"
+            _transcription_cache[cache_key] = {
+                "text": transcription,
+                "user_id": message.from_user.id,
+                "chat_id": message.chat.id,
+                "duration": message.voice.duration
+            }
 
             await status_msg.edit_text(
-                "⚠️ n8n недоступен, использую локальную транскрипцию..."
+                f"<b>🎤 Транскрипция</b> ({message.voice.duration}сек):\n\n"
+                f"<i>{transcription}</i>\n\n"
+                f"⚠️ AI анализ недоступен\n"
+                f"Что сделать с этим текстом?",
+                parse_mode="HTML",
+                reply_markup=create_transcription_keyboard(message.message_id, message.chat.id)
             )
-            await handle_local_transcription(message, bot, status_msg)
 
     except Exception as e:
         bot_logger.error(f"Error in AI voice report: {e}")
@@ -443,6 +528,120 @@ async def callback_voice_to_email(callback: CallbackQuery):
 
     except Exception as e:
         bot_logger.error(f"Error in voice_email callback: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("voice_to_journal:"))
+async def callback_voice_ai_to_journal(callback: CallbackQuery):
+    """Create work journal entry from AI extraction"""
+    try:
+        parts = callback.data.split(":")
+        admin_id = int(parts[1])
+        message_id = int(parts[2])
+
+        cache_key = f"voice_report:{admin_id}:{message_id}"
+        cached = _transcription_cache.get(cache_key)
+
+        if not cached:
+            await callback.answer("❌ Данные истекли", show_alert=True)
+            return
+
+        extraction = cached.get("extraction", {})
+        transcription = cached.get("transcription", "")
+
+        # Формируем данные для журнала
+        duration_h = extraction.get("duration_hours", 0)
+        travel_h = extraction.get("travel_hours", 0)
+        workers = extraction.get("workers", [])
+        company = extraction.get("company", "")
+        description = extraction.get("description", transcription[:500])
+
+        # Показываем готовые данные
+        workers_str = ", ".join(workers) if workers else "не указаны"
+
+        await callback.message.edit_text(
+            f"<b>📋 Данные для журнала работ:</b>\n\n"
+            f"⏱ <b>Длительность:</b> {duration_h} ч\n"
+            f"🚗 <b>Дорога:</b> {travel_h} ч\n"
+            f"👥 <b>Исполнители:</b> {workers_str}\n"
+            f"🏢 <b>Компания:</b> {company or 'не указана'}\n"
+            f"📋 <b>Описание:</b> {description}\n\n"
+            f"<i>Используйте /journal для создания записи с этими данными</i>",
+            parse_mode="HTML"
+        )
+
+        await callback.answer("✅ Данные готовы")
+
+    except Exception as e:
+        bot_logger.error(f"Error in voice_to_journal callback: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("voice_to_report:"))
+async def callback_voice_ai_to_report(callback: CallbackQuery):
+    """Create task report from AI extraction"""
+    try:
+        parts = callback.data.split(":")
+        admin_id = int(parts[1])
+        message_id = int(parts[2])
+
+        cache_key = f"voice_report:{admin_id}:{message_id}"
+        cached = _transcription_cache.get(cache_key)
+
+        if not cached:
+            await callback.answer("❌ Данные истекли", show_alert=True)
+            return
+
+        extraction = cached.get("extraction", {})
+        keywords = extraction.get("keywords", [])
+
+        await callback.message.edit_text(
+            f"<b>📝 Поиск задачи для отчёта</b>\n\n"
+            f"Ключевые слова: {', '.join(keywords) if keywords else 'нет'}\n\n"
+            f"<i>Функция в разработке.\n"
+            f"Используйте веб-интерфейс Plane для создания отчёта.</i>",
+            parse_mode="HTML"
+        )
+
+        await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"Error in voice_to_report callback: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("voice_find_task:"))
+async def callback_voice_find_task(callback: CallbackQuery):
+    """Search for task in Plane based on AI extraction"""
+    try:
+        parts = callback.data.split(":")
+        admin_id = int(parts[1])
+        message_id = int(parts[2])
+
+        cache_key = f"voice_report:{admin_id}:{message_id}"
+        cached = _transcription_cache.get(cache_key)
+
+        if not cached:
+            await callback.answer("❌ Данные истекли", show_alert=True)
+            return
+
+        extraction = cached.get("extraction", {})
+        keywords = extraction.get("keywords", [])
+        company = extraction.get("company", "")
+
+        await callback.message.edit_text(
+            f"<b>🔍 Поиск задачи в Plane</b>\n\n"
+            f"Компания: {company or 'любая'}\n"
+            f"Ключевые слова: {', '.join(keywords) if keywords else 'нет'}\n\n"
+            f"<i>Функция в разработке.\n"
+            f"Используйте веб-интерфейс Plane для поиска задачи.</i>",
+            parse_mode="HTML"
+        )
+
+        await callback.answer()
+
+    except Exception as e:
+        bot_logger.error(f"Error in voice_find_task callback: {e}")
         await callback.answer("❌ Ошибка", show_alert=True)
 
 

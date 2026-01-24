@@ -1,0 +1,77 @@
+{
+  "name": "Test Bot Connectivity",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test/ping",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-test",
+      "name": "Webhook: Test Ping",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "test-ping"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Echo back received data with timestamp\nconst received = $input.first().json;\n\nreturn {\n  json: {\n    status: 'ok',\n    message: 'n8n received your request!',\n    timestamp: new Date().toISOString(),\n    received_data: received\n  }\n};"
+      },
+      "id": "process-test",
+      "name": "Process: Echo Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-test",
+      "name": "Respond: OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [690, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Test Ping": {
+      "main": [
+        [
+          {
+            "node": "Process: Echo Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process: Echo Data": {
+      "main": [
+        [
+          {
+            "node": "Respond: OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Test",
+      "id": "test-tag"
+    }
+  ],
+  "triggerCount": 1,
+  "pinData": {}
+}

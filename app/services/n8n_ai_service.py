@@ -294,23 +294,21 @@ class N8nAIService:
     async def process_voice_report(
         self,
         message: Message,
-        voice_file_url: str,
+        transcription: str,
         admin_telegram_id: int,
         admin_name: str
     ) -> Tuple[bool, Optional[Dict]]:
         """
-        Отправить голосовое сообщение на обработку в n8n.
+        Отправить транскрипцию голосового на AI обработку в n8n.
 
         n8n workflow:
-        1. Скачивает файл
-        2. Транскрибирует через Whisper
-        3. AI извлекает данные (задача, длительность, компания, исполнители)
-        4. Ищет задачу в Plane
-        5. Создаёт отчёт
+        1. Получает транскрипцию (бот уже транскрибировал через Whisper)
+        2. AI извлекает данные (длительность, дорога, компания, исполнители, описание)
+        3. Возвращает результат через callback
 
         Args:
             message: Telegram сообщение с голосовым
-            voice_file_url: URL для скачивания файла
+            transcription: Текст транскрипции (уже обработан Whisper)
             admin_telegram_id: ID админа
             admin_name: Имя админа
 
@@ -318,14 +316,7 @@ class N8nAIService:
             Tuple[success, result]
         """
         data = {
-            "source": "telegram_bot",
-            "event_type": "voice_report",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "voice": {
-                "file_url": voice_file_url,
-                "duration": message.voice.duration if message.voice else 0,
-                "file_id": message.voice.file_id if message.voice else None,
-            },
+            "transcription": transcription,
             "admin": {
                 "telegram_id": admin_telegram_id,
                 "name": admin_name,
@@ -335,14 +326,13 @@ class N8nAIService:
                 "type": message.chat.type,
             },
             "message_id": message.message_id,
-            "callback_url": f"http://rd.hhivp.com:8083/webhooks/ai/voice-result"
         }
 
         bot_logger.info(
-            f"Sending voice for AI processing",
+            f"Sending transcription for AI extraction",
             extra={
                 "admin_id": admin_telegram_id,
-                "duration": data["voice"]["duration"]
+                "transcription_length": len(transcription)
             }
         )
 
