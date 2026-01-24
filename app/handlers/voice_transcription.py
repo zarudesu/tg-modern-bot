@@ -135,6 +135,22 @@ async def extract_report_data_with_ai(transcription: str) -> Optional[dict]:
     companies_list = ", ".join(companies) if companies else "любая"
     workers_list = ", ".join(workers) if workers else "любые"
 
+    # Common aliases for companies (voice may use shortened names)
+    company_aliases = """
+Company aliases (use the OFFICIAL name on the right):
+- "харизма", "хардслабс", "харц", "хардс" → "Харц Лабз"
+- "софтфабрик", "софт фабрик", "фабрик" → "СофтФабрик"
+- "3д ру", "тридиру", "3д" → "3Д.РУ"
+- "сад", "здоровье" → "Сад Здоровья"
+- "дельта телеком" → "Дельта"
+- "штифтер" → "Стифтер"
+- "сосновка" → "Сосновый бор"
+- "вёшки", "вешки" → "Вёшки 95"
+- "вондига" → "Вондига Парк"
+- "цифра" → "ЦифраЦифра"
+- "хивп", "эйчхивп" → "HHIVP"
+"""
+
     try:
         async with aiohttp.ClientSession() as session:
             url = "https://openrouter.ai/api/v1/chat/completions"
@@ -150,8 +166,10 @@ IMPORTANT: Try to match company and worker names to these valid values:
 - Valid companies: {companies_list}
 - Valid workers: {workers_list}
 
+{company_aliases}
+
 If mentioned name is similar but not exact, use the closest match from the list above.
-Example: "Хардслабс" → "Харц Лабз", "Серёга" → check if matches any worker.
+Voice may use informal/shortened names - always convert to official name!
 
 Respond ONLY with JSON (no markdown, no code blocks):
 {{
