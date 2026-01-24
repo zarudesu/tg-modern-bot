@@ -91,53 +91,78 @@ async def transcribe_with_whisper(file_path: str) -> Optional[str]:
     """
     Transcribe audio file using Whisper API.
 
-    Supports multiple providers:
-    1. Groq (free, fast) - GROQ_API_KEY
-    2. OpenAI (paid) - OPENAI_API_KEY
+    Supports multiple providers (in priority order):
+    1. HuggingFace (free) - HUGGINGFACE_API_KEY
+    2. Groq (paid, cheap) - GROQ_API_KEY
+    3. OpenAI (paid) - OPENAI_API_KEY
 
     Returns transcription text or None on error.
     """
-    # Try Groq first (free), then OpenAI
+    hf_key = getattr(settings, 'huggingface_api_key', None)
     groq_key = getattr(settings, 'groq_api_key', None)
     openai_key = getattr(settings, 'openai_api_key', None)
 
-    if groq_key:
-        # Use Groq (free, fast)
-        url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        api_key = groq_key
-        model = "whisper-large-v3-turbo"  # Fast & cheap
-        bot_logger.info("Using Groq Whisper for transcription")
-    elif openai_key:
-        # Fallback to OpenAI
-        url = "https://api.openai.com/v1/audio/transcriptions"
-        api_key = openai_key
-        model = "whisper-1"
-        bot_logger.info("Using OpenAI Whisper for transcription")
-    else:
-        bot_logger.warning("No Whisper API key configured (GROQ_API_KEY or OPENAI_API_KEY)")
-        return None
-
     try:
-        headers = {
-            "Authorization": f"Bearer {api_key}"
-        }
+        # Read audio file
+        with open(file_path, "rb") as f:
+            audio_data = f.read()
 
         async with aiohttp.ClientSession() as session:
-            with open(file_path, "rb") as audio_file:
+            # Try HuggingFace first (free)
+            if hf_key:
+                bot_logger.info("Using HuggingFace Whisper for transcription")
+                url = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
+                headers = {"Authorization": f"Bearer {hf_key}"}
+
+                async with session.post(url, headers=headers, data=audio_data) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        return result.get("text", "").strip()
+                    else:
+                        error_text = await resp.text()
+                        bot_logger.warning(f"HuggingFace API error: {resp.status} - {error_text}")
+                        # Fall through to next provider
+
+            # Try Groq (paid but cheap)
+            if groq_key:
+                bot_logger.info("Using Groq Whisper for transcription")
+                url = "https://api.groq.com/openai/v1/audio/transcriptions"
+                headers = {"Authorization": f"Bearer {groq_key}"}
+
                 form = aiohttp.FormData()
-                form.add_field("file", audio_file, filename="voice.ogg")
-                form.add_field("model", model)
-                form.add_field("language", "ru")  # Russian by default
+                form.add_field("file", audio_data, filename="voice.ogg", content_type="audio/ogg")
+                form.add_field("model", "whisper-large-v3-turbo")
+                form.add_field("language", "ru")
                 form.add_field("response_format", "text")
 
                 async with session.post(url, headers=headers, data=form) as resp:
-                    if resp.status != 200:
+                    if resp.status == 200:
+                        return (await resp.text()).strip()
+                    else:
                         error_text = await resp.text()
-                        bot_logger.error(f"Whisper API error: {resp.status} - {error_text}")
-                        return None
+                        bot_logger.warning(f"Groq API error: {resp.status} - {error_text}")
 
-                    transcription = await resp.text()
-                    return transcription.strip()
+            # Fallback to OpenAI (paid)
+            if openai_key:
+                bot_logger.info("Using OpenAI Whisper for transcription")
+                url = "https://api.openai.com/v1/audio/transcriptions"
+                headers = {"Authorization": f"Bearer {openai_key}"}
+
+                form = aiohttp.FormData()
+                form.add_field("file", audio_data, filename="voice.ogg", content_type="audio/ogg")
+                form.add_field("model", "whisper-1")
+                form.add_field("language", "ru")
+                form.add_field("response_format", "text")
+
+                async with session.post(url, headers=headers, data=form) as resp:
+                    if resp.status == 200:
+                        return (await resp.text()).strip()
+                    else:
+                        error_text = await resp.text()
+                        bot_logger.error(f"OpenAI API error: {resp.status} - {error_text}")
+
+        bot_logger.warning("No working Whisper API available")
+        return None
 
     except Exception as e:
         bot_logger.error(f"Error transcribing with Whisper: {e}")
@@ -231,14 +256,15 @@ async def handle_voice_message(message: Message, bot: Bot):
 
     # Check if ANY transcription API is configured
     has_n8n = bool(getattr(settings, 'n8n_url', None))
+    has_hf = bool(getattr(settings, 'huggingface_api_key', None))
     has_groq = bool(getattr(settings, 'groq_api_key', None))
     has_openai = bool(getattr(settings, 'openai_api_key', None))
-    has_whisper = has_groq or has_openai
+    has_whisper = has_hf or has_groq or has_openai
 
     if not has_n8n and not has_whisper:
         await message.reply(
-            "⚠️ Транскрипция голосовых сообщений недоступна\n"
-            "Настройте N8N_URL или GROQ_API_KEY",
+            "⚠️ Транскрипция голосовых недоступна\n"
+            "Настройте HUGGINGFACE_API_KEY",
             parse_mode=None
         )
         return

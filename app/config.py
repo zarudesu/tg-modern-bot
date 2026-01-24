@@ -77,7 +77,8 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None  # OpenRouter для бесплатных моделей
-    groq_api_key: Optional[str] = None  # Groq для бесплатной транскрипции Whisper
+    groq_api_key: Optional[str] = None  # Groq для транскрипции Whisper (платный)
+    huggingface_api_key: Optional[str] = None  # HuggingFace для бесплатной транскрипции Whisper
     ai_model: str = "gpt-4-turbo"  # Default AI model (fallback)
     ai_temperature: float = 0.7
     ai_max_tokens: int = 2000
