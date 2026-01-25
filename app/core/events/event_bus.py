@@ -238,18 +238,25 @@ class EventBus:
         # Создаём задачи для обработчиков
         tasks = []
         for handler in handlers:
-            task = self._execute_handler(handler, event)
-            tasks.append(task)
+            coro = self._execute_handler(handler, event)
+            tasks.append(coro)
+
+        if not tasks:
+            return []
 
         if wait:
             # Ждём выполнения всех обработчиков
             results = await asyncio.gather(*tasks, return_exceptions=True)
             return results
         else:
-            # FIX (2026-01-20): Track background tasks for graceful shutdown
-            task = asyncio.create_task(asyncio.gather(*tasks, return_exceptions=True))
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
+            # FIX (2026-01-25): Properly schedule background tasks
+            try:
+                gathered = asyncio.gather(*tasks, return_exceptions=True)
+                task = asyncio.create_task(gathered)
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+            except Exception as e:
+                bot_logger.warning(f"Failed to schedule event handlers: {e}")
             return []
 
     async def _execute_handler(self, handler: EventHandler, event: Event):

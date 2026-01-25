@@ -249,22 +249,8 @@ async def monitor_group_message(message: Message):
             bot_logger.warning(f"Failed to store message in DB: {e}")
 
         # ==================== 2. EVENT BUS ====================
-        # Создаём событие
-        event = MessageReceivedEvent(
-            message=message,
-            user_id=message.from_user.id,
-            chat_id=message.chat.id,
-            text=message.text or message.caption,
-            message_type=message_type,
-            metadata={
-                "chat_title": message.chat.title,
-                "chat_type": message.chat.type,
-                "from_user_name": message.from_user.full_name
-            }
-        )
-
-        # Публикуем событие (асинхронно, без ожидания)
-        await event_bus.publish(event, wait=False)
+        # NOTE: Event publishing is handled by EventPublisherMiddleware
+        # No need to publish here - it would cause duplicate events
 
         bot_logger.debug(
             f"Group message monitored: {message.text[:50] if message.text else message_type}",
