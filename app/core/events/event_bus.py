@@ -249,10 +249,15 @@ class EventBus:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             return results
         else:
-            # FIX (2026-01-25): Properly schedule background tasks
+            # FIX (2026-01-25): Properly schedule background tasks with wrapper coroutine
+            async def _run_handlers():
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                except Exception as e:
+                    bot_logger.warning(f"Background event handlers error: {e}")
+
             try:
-                gathered = asyncio.gather(*tasks, return_exceptions=True)
-                task = asyncio.create_task(gathered)
+                task = asyncio.create_task(_run_handlers())
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
             except Exception as e:

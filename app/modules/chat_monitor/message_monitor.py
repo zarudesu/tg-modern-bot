@@ -181,7 +181,7 @@ async def get_chat_plane_mapping(chat_id: int) -> Optional[dict]:
     """
     try:
         from ...database.database import get_async_session
-        from ...database.chat_support_models import ChatPlaneMapping
+        from ...database.support_requests_models import ChatPlaneMapping
         from sqlalchemy import select
 
         async for session in get_async_session():
