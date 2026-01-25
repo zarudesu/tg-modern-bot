@@ -2,8 +2,10 @@
 Мониторинг сообщений в чатах
 
 Читает все сообщения и:
-1. Публикует события для Event Bus (контекст)
-2. Отправляет на AI анализ через n8n (детекция задач)
+1. Сохраняет в БД для контекста (ChatContextService)
+2. Публикует события для Event Bus
+3. Детектирует проблемы (ProblemDetector)
+4. Отправляет на AI анализ через n8n (детекция задач)
 """
 from aiogram import Router, F
 from aiogram.types import Message
@@ -13,6 +15,8 @@ from typing import List, Optional
 from ...core.events.event_bus import event_bus, EventHandler, Event
 from ...core.events.events import MessageReceivedEvent
 from ...services.n8n_ai_service import n8n_ai_service
+from ...services.chat_context_service import chat_context_service
+from ...services.problem_detector_service import problem_detector
 from ...utils.logger import bot_logger
 from ...config import settings
 
@@ -64,6 +68,110 @@ class NotInSupportRequestFilter(BaseFilter):
             return True
 
 
+async def _detect_and_notify_problem(message: Message):
+    """
+    Detect problems in message and send alert to group.
+
+    Uses ProblemDetector for keyword + AI analysis.
+    Alerts go to the same group chat.
+    """
+    try:
+        # Check if problem detection is enabled
+        chat_settings = await chat_context_service.get_chat_settings(message.chat.id)
+        if chat_settings and not chat_settings.problem_detection_enabled:
+            return
+
+        # Analyze message
+        detection_result = await problem_detector.analyze_message(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+            username=message.from_user.full_name or message.from_user.username,
+            message_text=message.text,
+            use_ai=True  # Use AI for semantic analysis
+        )
+
+        if not detection_result:
+            return
+
+        # Store detected issue in DB
+        await chat_context_service.store_detected_issue(
+            chat_id=message.chat.id,
+            issue_type=detection_result.problem_type,
+            message_id=message.message_id,
+            user_id=message.from_user.id,
+            confidence=detection_result.confidence,
+            title=detection_result.title,
+            description=detection_result.description,
+            original_text=message.text
+        )
+
+        # Send alert to group (reply to original message)
+        alert_text = _format_problem_alert(detection_result, message.from_user.full_name)
+        await message.reply(
+            alert_text,
+            parse_mode="HTML",
+            disable_notification=True  # Silent notification
+        )
+
+        bot_logger.info(
+            f"Problem detected in chat {message.chat.id}: {detection_result.problem_type}",
+            extra={
+                "confidence": detection_result.confidence,
+                "keywords": detection_result.keywords_matched
+            }
+        )
+
+    except Exception as e:
+        bot_logger.error(f"Problem detection failed: {e}")
+
+
+def _format_problem_alert(result, username: str) -> str:
+    """Format problem detection result as Telegram message"""
+    # Emoji based on type
+    type_emoji = {
+        "urgent": "🚨",
+        "problem": "⚠️",
+        "question": "❓",
+        "complaint": "😤"
+    }
+    emoji = type_emoji.get(result.problem_type, "📋")
+
+    # Confidence indicator
+    if result.confidence >= 0.8:
+        conf_str = "высокая"
+    elif result.confidence >= 0.6:
+        conf_str = "средняя"
+    else:
+        conf_str = "низкая"
+
+    lines = [
+        f"{emoji} <b>Обнаружена проблема</b>",
+        f"",
+        f"<b>Тип:</b> {result.problem_type}",
+        f"<b>Уверенность:</b> {conf_str} ({result.confidence:.0%})",
+        f"",
+        f"<b>Краткое описание:</b>",
+        f"{result.title}",
+    ]
+
+    if result.keywords_matched:
+        keywords_str = ", ".join(result.keywords_matched[:5])
+        lines.append(f"")
+        lines.append(f"<i>Ключевые слова: {keywords_str}</i>")
+
+    # Suggested action
+    action_text = {
+        "create_task": "💼 Рекомендуется создать задачу",
+        "notify": "👀 Требует внимания",
+        "auto_reply": "💬 Можно ответить автоматически"
+    }
+    if result.suggested_action in action_text:
+        lines.append(f"")
+        lines.append(action_text[result.suggested_action])
+
+    return "\n".join(lines)
+
+
 async def get_chat_plane_mapping(chat_id: int) -> Optional[dict]:
     """
     Получить маппинг чата на проект Plane.
@@ -105,12 +213,13 @@ async def monitor_group_message(message: Message):
     """
     Мониторинг сообщений в группах
 
-    1. Публикует событие в Event Bus (для контекста)
-    2. Отправляет на AI анализ в n8n (для детекции задач)
+    1. Сохраняет в БД (persistent context)
+    2. Публикует событие в Event Bus
+    3. Детектирует проблемы (AI)
+    4. Отправляет на AI анализ в n8n (для детекции задач)
     """
     try:
-        # ==================== 1. EVENT BUS (контекст) ====================
-        # Определяем тип сообщения
+        # ==================== 0. DETERMINE MESSAGE TYPE ====================
         message_type = "text"
         if message.photo:
             message_type = "photo"
@@ -121,6 +230,23 @@ async def monitor_group_message(message: Message):
         elif message.video:
             message_type = "video"
 
+        # ==================== 1. PERSISTENT CONTEXT ====================
+        # Сохраняем сообщение в БД для долгосрочного контекста
+        try:
+            await chat_context_service.store_message(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                user_id=message.from_user.id,
+                username=message.from_user.username,
+                display_name=message.from_user.full_name,
+                message_text=message.text or message.caption,
+                message_type=message_type,
+                reply_to_message_id=message.reply_to_message.message_id if message.reply_to_message else None
+            )
+        except Exception as e:
+            bot_logger.warning(f"Failed to store message in DB: {e}")
+
+        # ==================== 2. EVENT BUS ====================
         # Создаём событие
         event = MessageReceivedEvent(
             message=message,
@@ -145,6 +271,11 @@ async def monitor_group_message(message: Message):
                 "user_id": message.from_user.id
             }
         )
+
+        # ==================== 3. PROBLEM DETECTION ====================
+        # Детектируем проблемы в текстовых сообщениях
+        if message_type == "text" and message.text:
+            await _detect_and_notify_problem(message)
 
         # ==================== 2. AI TASK DETECTION ====================
         # Проверяем, включена ли AI детекция
@@ -201,14 +332,17 @@ async def monitor_group_message(message: Message):
 
 class MessageContextBuilder(EventHandler):
     """
-    Обработчик для построения контекста из сообщений
+    Обработчик для построения контекста из сообщений.
 
-    Сохраняет последние N сообщений для каждого чата
+    DEPRECATED: In-memory storage is kept for backwards compatibility.
+    New code should use chat_context_service for persistent context.
+
+    Use get_context_from_db() for DB-backed context.
     """
 
     def __init__(self, max_messages: int = 50):
         self.max_messages = max_messages
-        self.chat_contexts: dict = {}  # chat_id -> List[Message]
+        self.chat_contexts: dict = {}  # chat_id -> List[Message] (in-memory cache)
 
     @property
     def event_types(self) -> List[str]:
@@ -224,14 +358,12 @@ class MessageContextBuilder(EventHandler):
         if not message:
             return
 
-        # Инициализируем контекст для чата если нужно
+        # In-memory cache (for backwards compatibility)
         if chat_id not in self.chat_contexts:
             self.chat_contexts[chat_id] = []
 
-        # Добавляем сообщение в контекст
         self.chat_contexts[chat_id].append(message)
 
-        # Ограничиваем размер контекста
         if len(self.chat_contexts[chat_id]) > self.max_messages:
             self.chat_contexts[chat_id] = self.chat_contexts[chat_id][-self.max_messages:]
 
@@ -244,12 +376,42 @@ class MessageContextBuilder(EventHandler):
         )
 
     def get_context(self, chat_id: int, limit: int = 10) -> List[Message]:
-        """Получить контекст чата (последние N сообщений)"""
+        """
+        Получить контекст чата из памяти (последние N сообщений).
+
+        DEPRECATED: Use get_context_from_db() for persistent context.
+        """
         context = self.chat_contexts.get(chat_id, [])
         return context[-limit:] if limit else context
 
+    async def get_context_from_db(self, chat_id: int, limit: int = 100) -> List[dict]:
+        """
+        Получить контекст чата из БД (persistent).
+
+        Returns list of message dicts with keys:
+        - user, text, time, type, message_id, sentiment, is_question, intent
+        """
+        return await chat_context_service.get_context(
+            chat_id=chat_id,
+            limit=limit,
+            include_metadata=True
+        )
+
+    async def get_context_as_text(self, chat_id: int, limit: int = 100) -> str:
+        """
+        Получить контекст как текст для AI промпта.
+
+        Returns formatted text:
+        [10:30] User: Message text
+        [10:31] Another: Reply
+        """
+        return await chat_context_service.get_context_as_text(
+            chat_id=chat_id,
+            limit=limit
+        )
+
     def clear_context(self, chat_id: int):
-        """Очистить контекст чата"""
+        """Очистить контекст чата (только in-memory)"""
         if chat_id in self.chat_contexts:
             del self.chat_contexts[chat_id]
 

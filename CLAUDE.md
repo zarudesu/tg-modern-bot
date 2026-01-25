@@ -254,7 +254,8 @@ curl http://localhost:8083/health  # Webhook health (bot runs on 8083)
 | **Daily Tasks** | ✅ PRODUCTION | `app/modules/daily_tasks/` | Email → Plane.so automation |
 | **Work Journal** | ✅ PRODUCTION | `app/modules/work_journal/` | Work entries → Google Sheets |
 | **AI Assistant** | 🚧 BETA | `app/modules/ai_assistant/` | OpenAI/Anthropic integration |
-| **Chat Monitor** | 🚧 BETA | `app/modules/chat_monitor/` | Context tracking |
+| **Chat Monitor** | ✅ PRODUCTION | `app/modules/chat_monitor/` | Persistent context + Problem detection |
+| **Chat AI Analysis** | ✅ PRODUCTION | `app/services/` | Summary + Problem detection + Context |
 
 ### Task Reports Module (PRODUCTION READY)
 
@@ -372,6 +373,70 @@ Bot: ✅ Задача создана в Plane (автор: User A, создал:
 - ⚠️ No chat mappings configured yet (run `/setup_chat` first)
 
 **📚 Full Documentation:** [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md)
+
+---
+
+### Chat AI Analysis Module (PRODUCTION READY)
+
+**Purpose:** AI-powered analysis of group chat messages for problem detection, summarization, and context tracking.
+
+**Architecture:**
+```
+Messages → ChatContextService (DB) → ProblemDetector → Alert to Group
+                                  → SummaryService → /ai_summary command
+```
+
+**Key Components:**
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `ChatContextService` | `app/services/chat_context_service.py` | Persistent message storage in PostgreSQL |
+| `ProblemDetectorService` | `app/services/problem_detector_service.py` | Keyword + AI problem detection |
+| `SummaryService` | `app/services/summary_service.py` | AI-powered chat summarization |
+| `ChatMessage` | `app/database/chat_ai_models.py` | SQLAlchemy model for messages |
+| `ChatAISettings` | `app/database/chat_ai_models.py` | Per-chat AI configuration |
+| `DetectedIssue` | `app/database/chat_ai_models.py` | Tracked problems/issues |
+
+**Database Tables (Migration 009):**
+- `chat_messages` - Persistent message history with AI analysis fields
+- `chat_ai_settings` - Per-chat configuration (context size, feature toggles)
+- `detected_issues` - Tracked problems with status workflow
+
+**AI Commands (Admin only):**
+```
+/ai_summary [N]     - Generate summary of last N messages (default: 100)
+/ai_daily           - Generate daily summary
+/ai_problems        - Show open detected problems
+/ai_settings        - View/change AI settings for chat
+/monitor_status     - Show monitoring statistics
+```
+
+**AI Settings Management:**
+```
+/ai_settings problem_detection on/off  - Toggle problem detection
+/ai_settings daily_summary on/off      - Toggle daily summaries
+/ai_settings context_size 100          - Set context window size
+```
+
+**Problem Detection:**
+- **Keyword matching** - Russian problem keywords ("не работает", "сломалось", "ошибка", etc.)
+- **Question patterns** - Detects unanswered questions
+- **Urgency boosters** - "срочно", "!!!", CAPS detection
+- **AI semantic analysis** - Uses OpenRouter for context-aware detection
+- **Rate limiting** - 60 seconds cooldown per chat
+
+**Message Storage:**
+- All group messages stored in `chat_messages` table
+- Configurable context size (default: 100 messages)
+- Long-term history preserved
+- AI analysis fields: sentiment, is_question, intent
+
+**Current Status:**
+- ✅ Persistent context storage (ChatContextService)
+- ✅ Problem detection with AI (ProblemDetectorService)
+- ✅ Summary generation (SummaryService)
+- ✅ Admin commands (/ai_summary, /ai_settings, /ai_problems)
+- ✅ Alerts sent to group chat (as replies)
 
 ---
 
@@ -1258,8 +1323,8 @@ export PLANE_API_TOKEN="plane_api_xxxx"
 
 ---
 
-**Last Updated:** 2026-01-24
-**Bot Version:** 2.9 (Voice Fill for TaskReports + Company Aliases)
+**Last Updated:** 2026-01-25
+**Bot Version:** 3.0 (Chat AI Analysis: Persistent Context + Problem Detection + Summarization)
 **Current Phase:** Phase 1 - Critical Fixes
 **Questions?** Check logs: `make bot-logs` or `./deploy.sh logs`
 
