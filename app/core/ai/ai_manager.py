@@ -8,6 +8,7 @@ from .base import AIProvider, AIMessage, AIResponse, AIConfig
 from .openai_provider import OpenAIProvider
 from .anthropic_provider import AnthropicProvider
 from .openrouter_provider import OpenRouterProvider, FREE_MODELS, RECOMMENDED_MODELS
+from .groq_provider import GroqProvider, GROQ_MODELS
 from ...utils.logger import bot_logger
 
 
@@ -16,6 +17,7 @@ class AIProviderType(Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    GROQ = "groq"
     CUSTOM = "custom"
 
 
@@ -158,6 +160,41 @@ class AIManager:
 
         self.register_provider(name, provider, set_as_default)
         return provider
+
+    def create_groq_provider(
+        self,
+        api_key: str,
+        model: str = "llama-3.3-70b-versatile",
+        name: str = "groq",
+        set_as_default: bool = False,
+        **config_kwargs
+    ) -> GroqProvider:
+        """
+        Создать и зарегистрировать Groq провайдер
+
+        Groq - очень быстрый LLM inference (LPU).
+        Бесплатный tier: ~14,400 requests/day.
+
+        Args:
+            api_key: Groq API ключ
+            model: Модель (llama-3.3-70b-versatile, llama-3.1-8b-instant, etc)
+            name: Имя провайдера
+            set_as_default: Установить как default
+            **config_kwargs: Дополнительные параметры конфигурации
+
+        Returns:
+            Созданный Groq провайдер
+        """
+        config = AIConfig(model=model, **config_kwargs)
+        provider = GroqProvider(api_key=api_key, config=config)
+
+        self.register_provider(name, provider, set_as_default)
+        return provider
+
+    @staticmethod
+    def get_groq_models() -> list:
+        """Получить список моделей Groq"""
+        return GROQ_MODELS.copy()
 
     @staticmethod
     def get_free_models() -> list:

@@ -54,15 +54,28 @@ async def on_startup(bot: Bot):
         bot_logger.info(f"✅ Webhook server started on port {webhook_port}")
 
         # 🔥 НОВОЕ: Инициализация AI Manager
-        # Приоритет: OpenRouter (бесплатные модели) > OpenAI > Anthropic
+        # Приоритет: Groq (быстрый, ключ уже есть) > OpenRouter > OpenAI > Anthropic
+        groq_key = getattr(settings, 'groq_api_key', None)
         openrouter_key = getattr(settings, 'openrouter_api_key', None)
         openai_key = getattr(settings, 'openai_api_key', None)
         anthropic_key = getattr(settings, 'anthropic_api_key', None)
 
         ai_initialized = False
 
-        # 1. Пробуем OpenRouter (бесплатные модели!)
-        if openrouter_key:
+        # 1. Пробуем Groq (очень быстрый, ключ уже есть для Whisper!)
+        if groq_key:
+            ai_manager.create_groq_provider(
+                api_key=groq_key,
+                model="llama-3.3-70b-versatile",  # Лучшая модель Groq
+                set_as_default=True,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            bot_logger.info("✅ AI Manager initialized with Groq (Llama 3.3 70B)")
+            ai_initialized = True
+
+        # 2. Пробуем OpenRouter (бесплатные модели!)
+        elif openrouter_key:
             ai_manager.create_openrouter_provider(
                 api_key=openrouter_key,
                 model="meta-llama/llama-3.1-8b-instruct:free",  # Хороший баланс
