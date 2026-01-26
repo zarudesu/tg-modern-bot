@@ -69,15 +69,7 @@ async def ai_command(message: Message):
         )
 
 
-@router.message(Command("ai_summary"))
-async def ai_summary_command(message: Message):
-    """Создать AI суммари чата"""
-    await message.reply(
-        "📊 *AI Суммаризация чата*\n\n"
-        "Эта функция анализирует последние сообщения и создаёт краткое резюме.\n\n"
-        "_В разработке..._",
-        parse_mode="Markdown"
-    )
+# NOTE: /ai_summary is implemented in chat_monitor/handlers.py with full thread mapping support
 
 
 @router.message(Command("ai_auto_task"))
