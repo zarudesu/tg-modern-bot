@@ -11,7 +11,7 @@ from sqlalchemy import select, delete, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database.database import get_async_session, AsyncSessionLocal
-from ..database.chat_ai_models import ChatMessage, ChatAISettings, DetectedIssue
+from ..database.chat_ai_models import ChatMessage, ChatAISettings, DetectedIssue, ThreadClientMapping
 from ..utils.logger import bot_logger
 
 
@@ -43,7 +43,8 @@ class ChatContextService:
         display_name: Optional[str],
         message_text: Optional[str],
         message_type: str = 'text',
-        reply_to_message_id: Optional[int] = None
+        reply_to_message_id: Optional[int] = None,
+        thread_id: Optional[int] = None
     ) -> ChatMessage:
         """
         Store a message in the database.
@@ -57,6 +58,7 @@ class ChatContextService:
             message_text: Message content
             message_type: Type of message (text, voice, photo, etc.)
             reply_to_message_id: ID of message being replied to
+            thread_id: Topic/thread ID for supergroups with topics
 
         Returns:
             Created ChatMessage object
@@ -64,6 +66,7 @@ class ChatContextService:
         async with AsyncSessionLocal() as session:
             message = ChatMessage(
                 chat_id=chat_id,
+                thread_id=thread_id,
                 message_id=message_id,
                 user_id=user_id,
                 username=username,
@@ -77,7 +80,8 @@ class ChatContextService:
             await session.commit()
             await session.refresh(message)
 
-            bot_logger.debug(f"Stored message {message_id} from chat {chat_id}")
+            bot_logger.debug(f"Stored message {message_id} from chat {chat_id}" +
+                           (f" thread {thread_id}" if thread_id else ""))
             return message
 
     async def get_context(
@@ -385,6 +389,176 @@ class ChatContextService:
             )
 
             return list(result.scalars().all())
+
+    # ==================== Thread Client Mapping ====================
+
+    async def create_thread_mapping(
+        self,
+        work_group_id: int,
+        thread_id: int,
+        client_chat_id: int,
+        client_name: str,
+        thread_name: Optional[str] = None,
+        plane_project_id: Optional[str] = None,
+        created_by: Optional[int] = None
+    ) -> ThreadClientMapping:
+        """
+        Create a mapping between admin work group thread and client chat.
+
+        Args:
+            work_group_id: Admin work group chat_id
+            thread_id: Thread ID in work group
+            client_chat_id: Client's group chat_id
+            client_name: Client name (e.g., "DELTA")
+            thread_name: Thread name for display
+            plane_project_id: Optional Plane project ID
+            created_by: Admin who created mapping
+
+        Returns:
+            Created ThreadClientMapping
+        """
+        async with AsyncSessionLocal() as session:
+            mapping = ThreadClientMapping(
+                work_group_id=work_group_id,
+                thread_id=thread_id,
+                client_chat_id=client_chat_id,
+                client_name=client_name,
+                thread_name=thread_name,
+                plane_project_id=plane_project_id,
+                created_by=created_by,
+                is_active=True
+            )
+
+            session.add(mapping)
+            await session.commit()
+            await session.refresh(mapping)
+
+            bot_logger.info(f"Created thread mapping: thread {thread_id} -> client {client_name} (chat {client_chat_id})")
+            return mapping
+
+    async def get_mapping_by_thread(
+        self,
+        thread_id: int,
+        work_group_id: Optional[int] = None
+    ) -> Optional[ThreadClientMapping]:
+        """Get mapping for a specific thread"""
+        async with AsyncSessionLocal() as session:
+            query = select(ThreadClientMapping).where(
+                and_(
+                    ThreadClientMapping.thread_id == thread_id,
+                    ThreadClientMapping.is_active == True
+                )
+            )
+
+            if work_group_id:
+                query = query.where(ThreadClientMapping.work_group_id == work_group_id)
+
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+
+    async def get_mapping_by_client(
+        self,
+        client_name: str
+    ) -> Optional[ThreadClientMapping]:
+        """Get mapping for a client by name"""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ThreadClientMapping).where(
+                    and_(
+                        ThreadClientMapping.client_name == client_name,
+                        ThreadClientMapping.is_active == True
+                    )
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def get_all_mappings(
+        self,
+        work_group_id: Optional[int] = None
+    ) -> List[ThreadClientMapping]:
+        """Get all active thread mappings"""
+        async with AsyncSessionLocal() as session:
+            query = select(ThreadClientMapping).where(
+                ThreadClientMapping.is_active == True
+            ).order_by(ThreadClientMapping.client_name)
+
+            if work_group_id:
+                query = query.where(ThreadClientMapping.work_group_id == work_group_id)
+
+            result = await session.execute(query)
+            return list(result.scalars().all())
+
+    async def delete_mapping(
+        self,
+        mapping_id: int
+    ) -> bool:
+        """Soft delete a mapping (set is_active=False)"""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ThreadClientMapping).where(ThreadClientMapping.id == mapping_id)
+            )
+            mapping = result.scalar_one_or_none()
+
+            if mapping:
+                mapping.is_active = False
+                await session.commit()
+                bot_logger.info(f"Deleted thread mapping {mapping_id}: {mapping.client_name}")
+                return True
+
+            return False
+
+    async def get_context_for_thread(
+        self,
+        thread_id: int,
+        work_group_id: Optional[int] = None,
+        limit: Optional[int] = None
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
+        """
+        Get context from CLIENT CHAT for a work group thread.
+
+        Args:
+            thread_id: Thread ID in work group
+            work_group_id: Work group chat_id
+            limit: Max messages
+
+        Returns:
+            Tuple of (context list, client_name) or ([], None) if no mapping
+        """
+        mapping = await self.get_mapping_by_thread(thread_id, work_group_id)
+
+        if not mapping:
+            return [], None
+
+        context = await self.get_context(
+            chat_id=mapping.client_chat_id,
+            limit=limit
+        )
+
+        return context, mapping.client_name
+
+    async def get_context_as_text_for_thread(
+        self,
+        thread_id: int,
+        work_group_id: Optional[int] = None,
+        limit: Optional[int] = None
+    ) -> tuple[str, Optional[str]]:
+        """
+        Get context as text from CLIENT CHAT for a work group thread.
+
+        Returns:
+            Tuple of (context text, client_name) or ("", None) if no mapping
+        """
+        mapping = await self.get_mapping_by_thread(thread_id, work_group_id)
+
+        if not mapping:
+            return "", None
+
+        context_text = await self.get_context_as_text(
+            chat_id=mapping.client_chat_id,
+            limit=limit
+        )
+
+        return context_text, mapping.client_name
 
 
 # Global instance

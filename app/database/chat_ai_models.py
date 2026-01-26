@@ -26,6 +26,7 @@ class ChatMessage(Base):
 
     id = Column(Integer, primary_key=True)
     chat_id = Column(BigInteger, nullable=False, index=True)
+    thread_id = Column(BigInteger, nullable=True)  # message_thread_id for topics/threads
     message_id = Column(BigInteger, nullable=True)  # Telegram message ID
     user_id = Column(BigInteger, nullable=False)
     username = Column(String(255), nullable=True)
@@ -45,6 +46,7 @@ class ChatMessage(Base):
     __table_args__ = (
         Index('idx_chat_messages_chat_created', 'chat_id', 'created_at'),
         Index('idx_chat_messages_user', 'user_id'),
+        Index('idx_chat_messages_thread', 'thread_id'),
     )
 
     def __repr__(self):
@@ -55,6 +57,7 @@ class ChatMessage(Base):
         return {
             'id': self.id,
             'chat_id': self.chat_id,
+            'thread_id': self.thread_id,
             'message_id': self.message_id,
             'user_id': self.user_id,
             'username': self.username,
@@ -167,4 +170,58 @@ class DetectedIssue(Base):
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'plane_issue_id': self.plane_issue_id,
+        }
+
+
+class ThreadClientMapping(Base):
+    """
+    Maps threads in admin work group to client chats.
+
+    Use case:
+    - Admin work group has threads for each client (e.g., "DELTA", "HARZL")
+    - Each thread is linked to the actual client chat
+    - /ai_summary in thread shows summary FROM client chat
+    """
+    __tablename__ = 'thread_client_mappings'
+
+    id = Column(Integer, primary_key=True)
+
+    # Thread in admin work group
+    work_group_id = Column(BigInteger, nullable=False)  # Admin work group chat_id
+    thread_id = Column(BigInteger, nullable=False)  # Thread ID in work group
+    thread_name = Column(String(255), nullable=True)  # Thread name for display
+
+    # Client chat to monitor
+    client_chat_id = Column(BigInteger, nullable=False)  # Client's group chat_id
+    client_name = Column(String(255), nullable=False)  # Client name (e.g., "DELTA")
+
+    # Optional Plane integration
+    plane_project_id = Column(String(100), nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(BigInteger, nullable=True)  # Admin who created mapping
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_thread_mapping_work_group', 'work_group_id'),
+        Index('idx_thread_mapping_thread', 'thread_id'),
+        Index('idx_thread_mapping_client', 'client_chat_id'),
+        Index('idx_thread_mapping_unique', 'work_group_id', 'thread_id', unique=True),
+    )
+
+    def __repr__(self):
+        return f"<ThreadClientMapping(thread={self.thread_id}, client={self.client_name})>"
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'work_group_id': self.work_group_id,
+            'thread_id': self.thread_id,
+            'thread_name': self.thread_name,
+            'client_chat_id': self.client_chat_id,
+            'client_name': self.client_name,
+            'plane_project_id': self.plane_project_id,
+            'is_active': self.is_active,
         }

@@ -1,9 +1,20 @@
 """
 Команды для управления мониторингом чатов и AI анализом
+
+Thread Mapping Commands (for admins):
+- /link_thread <client_chat_id> <client_name> - Link current thread to client chat
+- /threads - List all thread mappings
+- /unlink_thread - Remove mapping for current thread
+
+AI Commands (work in threads - fetch context from CLIENT chat):
+- /ai_summary - Summary of client chat (when in mapped thread)
+- /ai_daily - Daily summary
+- /ai_problems - Detected issues
 """
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
+from typing import Optional
 
 from ...config import settings
 from ...services.summary_service import summary_service
@@ -85,9 +96,15 @@ async def ai_summary_command(message: Message):
     """
     Generate AI summary of recent chat discussion.
 
-    Usage:
-    /ai_summary - Summary of last 100 messages
-    /ai_summary 50 - Summary of last 50 messages
+    Usage in WORK GROUP THREAD (mapped to client):
+    /ai_summary - Summary of CLIENT'S chat (last 100 messages)
+    /ai_summary 50 - Summary of last 50 messages from client chat
+
+    Usage in CLIENT CHAT (direct):
+    /ai_summary - Summary of this chat
+
+    Usage in PM with client name:
+    /ai_summary DELTA - Summary of DELTA's chat
     """
     user_id = message.from_user.id
 
@@ -96,29 +113,62 @@ async def ai_summary_command(message: Message):
         await message.reply("❌ Только для админов")
         return
 
-    # Parse limit from command args
+    # Parse args
     limit = 100
+    client_name_arg = None
+
     if message.text:
         parts = message.text.split()
-        if len(parts) > 1:
+        for part in parts[1:]:
             try:
-                limit = int(parts[1])
-                limit = max(10, min(500, limit))  # Clamp between 10 and 500
+                limit = int(part)
+                limit = max(10, min(500, limit))
             except ValueError:
-                pass
+                # Not a number - might be client name
+                client_name_arg = part
+
+    # Determine target chat
+    thread_id = getattr(message, 'message_thread_id', None)
+    target_chat_id = message.chat.id
+    client_name = None
+
+    # Check if we're in a mapped thread
+    if thread_id:
+        mapping = await chat_context_service.get_mapping_by_thread(
+            thread_id=thread_id,
+            work_group_id=message.chat.id
+        )
+        if mapping:
+            target_chat_id = mapping.client_chat_id
+            client_name = mapping.client_name
+            bot_logger.info(f"AI Summary: Using mapped client {client_name} (chat {target_chat_id})")
+
+    # Or check if client name provided as argument
+    if client_name_arg and not client_name:
+        mapping = await chat_context_service.get_mapping_by_client(client_name_arg.upper())
+        if mapping:
+            target_chat_id = mapping.client_chat_id
+            client_name = mapping.client_name
+            bot_logger.info(f"AI Summary: Using client {client_name} from arg (chat {target_chat_id})")
+        else:
+            await message.reply(f"❌ Клиент <b>{client_name_arg}</b> не найден в маппинге", parse_mode="HTML")
+            return
 
     # Send "typing" status
     await message.bot.send_chat_action(message.chat.id, "typing")
 
     # Generate summary
     summary = await summary_service.generate_summary(
-        chat_id=message.chat.id,
+        chat_id=target_chat_id,
         limit=limit,
         summary_type="general"
     )
 
     if summary:
         formatted = summary_service.format_summary_message(summary)
+        if client_name:
+            header = f"📊 <b>Резюме чата клиента {client_name}</b>\n\n"
+            formatted = header + formatted
         await message.reply(formatted, parse_mode="HTML")
     else:
         await message.reply(
@@ -283,5 +333,159 @@ async def ai_settings_command(message: Message):
         f"<code>/ai_settings problem_detection on/off</code>\n"
         f"<code>/ai_settings daily_summary on/off</code>\n"
         f"<code>/ai_settings context_size 100</code>",
+        parse_mode="HTML"
+    )
+
+
+# ===================== THREAD MAPPING COMMANDS =====================
+
+@router.message(Command("link_thread"))
+async def link_thread_command(message: Message):
+    """
+    Link current thread to a client chat.
+
+    Usage (in a thread):
+    /link_thread <client_chat_id> <client_name>
+
+    Example:
+    /link_thread -1001234567890 DELTA
+    """
+    user_id = message.from_user.id
+
+    if not settings.is_admin(user_id):
+        await message.reply("❌ Только для админов")
+        return
+
+    # Must be in a thread
+    thread_id = getattr(message, 'message_thread_id', None)
+    if not thread_id:
+        await message.reply(
+            "❌ <b>Эта команда работает только в треде</b>\n\n"
+            "Перейдите в тред (topic) рабочей группы и выполните команду там.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Parse arguments
+    parts = message.text.split() if message.text else []
+    if len(parts) < 3:
+        await message.reply(
+            "❌ <b>Неверный формат</b>\n\n"
+            "Использование:\n"
+            "<code>/link_thread &lt;client_chat_id&gt; &lt;client_name&gt;</code>\n\n"
+            "Пример:\n"
+            "<code>/link_thread -1001234567890 DELTA</code>\n\n"
+            "Чтобы узнать chat_id клиента, перешлите сообщение из его чата боту @userinfobot",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        client_chat_id = int(parts[1])
+        client_name = parts[2].upper()
+    except ValueError:
+        await message.reply("❌ client_chat_id должен быть числом")
+        return
+
+    # Check if mapping already exists
+    existing = await chat_context_service.get_mapping_by_thread(thread_id, message.chat.id)
+    if existing:
+        await message.reply(
+            f"⚠️ Этот тред уже привязан к клиенту <b>{existing.client_name}</b>\n\n"
+            f"Используйте /unlink_thread чтобы удалить привязку",
+            parse_mode="HTML"
+        )
+        return
+
+    # Create mapping
+    mapping = await chat_context_service.create_thread_mapping(
+        work_group_id=message.chat.id,
+        thread_id=thread_id,
+        client_chat_id=client_chat_id,
+        client_name=client_name,
+        thread_name=None,  # TODO: get thread name from Telegram API
+        created_by=user_id
+    )
+
+    await message.reply(
+        f"✅ <b>Тред привязан к клиенту</b>\n\n"
+        f"• Клиент: <b>{client_name}</b>\n"
+        f"• Chat ID клиента: <code>{client_chat_id}</code>\n"
+        f"• Thread ID: <code>{thread_id}</code>\n\n"
+        f"Теперь /ai_summary в этом треде будет показывать резюме из чата клиента.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("threads"))
+async def threads_command(message: Message):
+    """
+    List all thread-to-client mappings.
+
+    Usage:
+    /threads - Show all mappings
+    """
+    user_id = message.from_user.id
+
+    if not settings.is_admin(user_id):
+        await message.reply("❌ Только для админов")
+        return
+
+    mappings = await chat_context_service.get_all_mappings()
+
+    if not mappings:
+        await message.reply(
+            "📋 <b>Нет привязок тредов к клиентам</b>\n\n"
+            "Используйте /link_thread в треде чтобы создать привязку.",
+            parse_mode="HTML"
+        )
+        return
+
+    lines = ["📋 <b>Привязки тредов к клиентам</b>\n"]
+
+    for m in mappings:
+        lines.append(
+            f"• <b>{m.client_name}</b>\n"
+            f"  Thread: <code>{m.thread_id}</code>\n"
+            f"  Client chat: <code>{m.client_chat_id}</code>"
+        )
+        lines.append("")
+
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("unlink_thread"))
+async def unlink_thread_command(message: Message):
+    """
+    Remove thread-to-client mapping.
+
+    Usage (in a thread):
+    /unlink_thread - Remove mapping for current thread
+    """
+    user_id = message.from_user.id
+
+    if not settings.is_admin(user_id):
+        await message.reply("❌ Только для админов")
+        return
+
+    thread_id = getattr(message, 'message_thread_id', None)
+    if not thread_id:
+        await message.reply(
+            "❌ <b>Эта команда работает только в треде</b>\n\n"
+            "Перейдите в тред и выполните команду там.",
+            parse_mode="HTML"
+        )
+        return
+
+    mapping = await chat_context_service.get_mapping_by_thread(thread_id, message.chat.id)
+    if not mapping:
+        await message.reply("❌ Этот тред не привязан к клиенту")
+        return
+
+    client_name = mapping.client_name
+    await chat_context_service.delete_mapping(mapping.id)
+
+    await message.reply(
+        f"✅ Привязка к клиенту <b>{client_name}</b> удалена",
         parse_mode="HTML"
     )

@@ -232,7 +232,9 @@ async def monitor_group_message(message: Message):
 
         # ==================== 1. PERSISTENT CONTEXT ====================
         # Сохраняем сообщение в БД для долгосрочного контекста
-        bot_logger.info(f"📨 Chat Monitor: message from {message.from_user.full_name} in {message.chat.title}")
+        thread_id = getattr(message, 'message_thread_id', None)
+        bot_logger.info(f"📨 Chat Monitor: message from {message.from_user.full_name} in {message.chat.title}" +
+                       (f" [thread {thread_id}]" if thread_id else ""))
         try:
             await chat_context_service.store_message(
                 chat_id=message.chat.id,
@@ -242,9 +244,11 @@ async def monitor_group_message(message: Message):
                 display_name=message.from_user.full_name,
                 message_text=message.text or message.caption,
                 message_type=message_type,
-                reply_to_message_id=message.reply_to_message.message_id if message.reply_to_message else None
+                reply_to_message_id=message.reply_to_message.message_id if message.reply_to_message else None,
+                thread_id=thread_id
             )
-            bot_logger.info(f"✅ Message stored in DB: chat_id={message.chat.id}")
+            bot_logger.info(f"✅ Message stored in DB: chat_id={message.chat.id}" +
+                           (f" thread_id={thread_id}" if thread_id else ""))
         except Exception as e:
             bot_logger.warning(f"Failed to store message in DB: {e}")
 
