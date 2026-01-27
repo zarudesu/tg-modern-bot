@@ -68,12 +68,45 @@ class NotInSupportRequestFilter(BaseFilter):
             return True
 
 
+async def _get_thread_mapping_for_client(client_chat_id: int) -> Optional[dict]:
+    """
+    Find admin thread mapping for a client chat.
+
+    Returns dict with work_group_id, thread_id, client_name or None.
+    """
+    try:
+        from ...database.database import get_async_session
+        from ...database.chat_ai_models import ThreadClientMapping
+        from sqlalchemy import select
+
+        async for session in get_async_session():
+            result = await session.execute(
+                select(ThreadClientMapping).where(
+                    ThreadClientMapping.client_chat_id == client_chat_id,
+                    ThreadClientMapping.is_active == True
+                )
+            )
+            mapping = result.scalar_one_or_none()
+
+            if mapping:
+                return {
+                    "work_group_id": mapping.work_group_id,
+                    "thread_id": mapping.thread_id,
+                    "client_name": mapping.client_name,
+                    "thread_name": mapping.thread_name
+                }
+            return None
+    except Exception as e:
+        bot_logger.error(f"Error getting thread mapping: {e}")
+        return None
+
+
 async def _detect_and_notify_problem(message: Message):
     """
-    Detect problems in message and send alert to group.
+    Detect problems in message using AI and forward alert to admin thread.
 
-    Uses ProblemDetector for keyword + AI analysis.
-    Alerts go to the same group chat.
+    Uses AI-only detection (no keyword matching requirement).
+    Alerts go to the mapped admin work group thread (NOT to client chat).
     """
     try:
         # Check if problem detection is enabled
@@ -81,13 +114,21 @@ async def _detect_and_notify_problem(message: Message):
         if chat_settings and not chat_settings.problem_detection_enabled:
             return
 
-        # Analyze message
+        # Check if this client chat has a thread mapping
+        thread_mapping = await _get_thread_mapping_for_client(message.chat.id)
+        if not thread_mapping:
+            # No mapping = no notification (user requested no same-chat alerts)
+            bot_logger.debug(f"No thread mapping for chat {message.chat.id}, skipping problem detection")
+            return
+
+        # Analyze message with AI-only detection
         detection_result = await problem_detector.analyze_message(
             chat_id=message.chat.id,
             user_id=message.from_user.id,
             username=message.from_user.full_name or message.from_user.username,
             message_text=message.text,
-            use_ai=True  # Use AI for semantic analysis
+            use_ai=True,
+            ai_only=True  # AI-only detection (no keyword requirement)
         )
 
         if not detection_result:
@@ -105,19 +146,36 @@ async def _detect_and_notify_problem(message: Message):
             original_text=message.text
         )
 
-        # Send alert to group (reply to original message)
-        alert_text = _format_problem_alert(detection_result, message.from_user.full_name)
-        await message.reply(
-            alert_text,
-            parse_mode="HTML",
-            disable_notification=True  # Silent notification
+        # Format alert for admin thread
+        alert_text = _format_problem_alert_for_admin(
+            detection_result,
+            message.from_user.full_name,
+            message.chat.title,
+            thread_mapping["client_name"]
         )
+
+        # Send alert to admin work group thread (NOT to client chat)
+        try:
+            await message.bot.send_message(
+                chat_id=thread_mapping["work_group_id"],
+                message_thread_id=thread_mapping["thread_id"],
+                text=alert_text,
+                parse_mode="HTML",
+                disable_notification=False  # Notify admins
+            )
+            bot_logger.info(
+                f"Problem alert sent to admin thread {thread_mapping['thread_id']} "
+                f"for client {thread_mapping['client_name']}"
+            )
+        except Exception as e:
+            bot_logger.error(f"Failed to send alert to admin thread: {e}")
 
         bot_logger.info(
             f"Problem detected in chat {message.chat.id}: {detection_result.problem_type}",
             extra={
                 "confidence": detection_result.confidence,
-                "keywords": detection_result.keywords_matched
+                "client": thread_mapping["client_name"],
+                "ai_only": True
             }
         )
 
@@ -126,7 +184,7 @@ async def _detect_and_notify_problem(message: Message):
 
 
 def _format_problem_alert(result, username: str) -> str:
-    """Format problem detection result as Telegram message"""
+    """Format problem detection result as Telegram message (legacy, for same-chat alerts)"""
     # Emoji based on type
     type_emoji = {
         "urgent": "🚨",
@@ -167,6 +225,65 @@ def _format_problem_alert(result, username: str) -> str:
     }
     if result.suggested_action in action_text:
         lines.append(f"")
+        lines.append(action_text[result.suggested_action])
+
+    return "\n".join(lines)
+
+
+def _format_problem_alert_for_admin(result, username: str, chat_title: str, client_name: str) -> str:
+    """
+    Format problem detection result for admin thread notification.
+
+    Includes client context so admins know which chat the problem is from.
+    """
+    # Type mapping
+    type_emoji = {
+        "urgent": "🚨",
+        "problem": "⚠️",
+        "question": "❓",
+        "complaint": "😤"
+    }
+    emoji = type_emoji.get(result.problem_type, "📋")
+
+    type_names = {
+        "urgent": "СРОЧНО",
+        "problem": "Проблема",
+        "question": "Вопрос",
+        "complaint": "Жалоба"
+    }
+    type_name = type_names.get(result.problem_type, result.problem_type)
+
+    # Confidence indicator
+    if result.confidence >= 0.8:
+        conf_str = "высокая"
+    elif result.confidence >= 0.6:
+        conf_str = "средняя"
+    else:
+        conf_str = "низкая"
+
+    lines = [
+        f"{emoji} <b>AI детекция: {type_name}</b>",
+        f"",
+        f"📍 <b>Клиент:</b> {client_name}",
+        f"👤 <b>От:</b> {username}",
+        f"💬 <b>Чат:</b> {chat_title}",
+        f"",
+        f"<b>Суть:</b>",
+        f"{result.title}",
+        f"",
+        f"<b>Детали:</b>",
+        f"<i>{result.description[:200]}{'...' if len(result.description) > 200 else ''}</i>",
+        f"",
+        f"🎯 Уверенность AI: {conf_str} ({result.confidence:.0%})",
+    ]
+
+    # Suggested action
+    action_text = {
+        "create_task": "💼 Рекомендация: создать задачу",
+        "notify": "👀 Рекомендация: проверить",
+        "auto_reply": "💬 Можно ответить автоматически"
+    }
+    if result.suggested_action in action_text:
         lines.append(action_text[result.suggested_action])
 
     return "\n".join(lines)

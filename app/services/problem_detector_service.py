@@ -87,7 +87,8 @@ class ProblemDetectorService:
         user_id: int,
         username: str,
         message_text: str,
-        use_ai: bool = True
+        use_ai: bool = True,
+        ai_only: bool = True  # NEW: Use AI-only detection (no keyword requirement)
     ) -> Optional[DetectionResult]:
         """
         Analyze a message for problems.
@@ -98,11 +99,12 @@ class ProblemDetectorService:
             username: User's display name
             message_text: Message content
             use_ai: Whether to use AI analysis (slower but more accurate)
+            ai_only: If True, use AI for all messages (no keyword requirement)
 
         Returns:
             DetectionResult if problem detected, None otherwise
         """
-        if not message_text or len(message_text) < 5:
+        if not message_text or len(message_text) < 10:  # Minimum 10 chars for AI analysis
             return None
 
         # Rate limiting
@@ -111,7 +113,7 @@ class ProblemDetectorService:
 
         text_lower = message_text.lower()
 
-        # Step 1: Keyword matching
+        # Step 1: Keyword matching (still useful for metadata)
         matched_keywords = self._match_keywords(text_lower)
         is_question = self._is_question(message_text)
         urgency_score = self._calculate_urgency(message_text)
@@ -119,25 +121,32 @@ class ProblemDetectorService:
         # Calculate base confidence from keywords
         base_confidence = min(len(matched_keywords) * 0.2 + urgency_score * 0.3, 0.7)
 
-        # If no keywords and not urgent, skip
-        if not matched_keywords and urgency_score < 0.3 and not is_question:
-            return None
-
-        # Step 2: AI analysis (if enabled and suspicion is high enough)
+        # Step 2: AI analysis
         ai_result = None
-        if use_ai and (base_confidence >= 0.3 or is_question):
-            ai_result = await self._ai_analyze(chat_id, username, message_text)
+        if use_ai:
+            if ai_only:
+                # AI-only mode: always analyze with AI (no keyword requirement)
+                ai_result = await self._ai_analyze(chat_id, username, message_text)
+            elif base_confidence >= 0.3 or is_question:
+                # Classic mode: AI only if keywords match or question
+                ai_result = await self._ai_analyze(chat_id, username, message_text)
+
+        # If AI-only mode and no AI result, skip (don't fallback to keywords)
+        if ai_only and not ai_result:
+            return None
 
         # Combine results
         if ai_result:
             # AI result takes precedence
-            final_confidence = (base_confidence * 0.3 + ai_result['confidence'] * 0.7)
+            final_confidence = ai_result['confidence']  # Use AI confidence directly
             problem_type = ai_result.get('type', 'problem')
             title = ai_result.get('title', message_text[:50])
             description = ai_result.get('description', message_text)
             suggested_action = ai_result.get('action', 'notify')
         else:
-            # Use keyword-based result
+            # Use keyword-based result (only in non-AI-only mode)
+            if not matched_keywords and urgency_score < 0.3 and not is_question:
+                return None
             final_confidence = base_confidence
             problem_type = 'urgent' if urgency_score > 0.5 else ('question' if is_question else 'problem')
             title = message_text[:50] + ('...' if len(message_text) > 50 else '')
