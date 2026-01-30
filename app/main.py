@@ -66,7 +66,7 @@ async def on_startup(bot: Bot):
         if groq_key:
             ai_manager.create_groq_provider(
                 api_key=groq_key,
-                model="llama-3.3-70b-versatile",  # Лучшая модель Groq
+                model="llama-3.1-8b-instant",  # Быстрая модель, доступна на free tier
                 set_as_default=True,
                 temperature=0.7,
                 max_tokens=1500
