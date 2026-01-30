@@ -124,7 +124,8 @@ class OpenRouterProvider(AIProvider):
                             fallback_model = await self._get_fallback_model(model)
                             if fallback_model:
                                 bot_logger.info(f"Trying fallback model: {fallback_model}")
-                                return await self.complete(messages, model=fallback_model, **kwargs)
+                                fallback_kwargs = {k: v for k, v in kwargs.items() if k != 'model'}
+                                return await self.complete(messages, model=fallback_model, **fallback_kwargs)
 
                         raise Exception(f"OpenRouter API error: {response.status}")
 
