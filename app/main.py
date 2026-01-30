@@ -54,7 +54,7 @@ async def on_startup(bot: Bot):
         bot_logger.info(f"✅ Webhook server started on port {webhook_port}")
 
         # 🔥 НОВОЕ: Инициализация AI Manager
-        # Приоритет: Groq (быстрый, ключ уже есть) > OpenRouter > OpenAI > Anthropic
+        # Приоритет: OpenRouter (работает из РФ) > Groq > OpenAI > Anthropic
         groq_key = getattr(settings, 'groq_api_key', None)
         openrouter_key = getattr(settings, 'openrouter_api_key', None)
         openai_key = getattr(settings, 'openai_api_key', None)
@@ -62,20 +62,8 @@ async def on_startup(bot: Bot):
 
         ai_initialized = False
 
-        # 1. Пробуем Groq (очень быстрый, ключ уже есть для Whisper!)
-        if groq_key:
-            ai_manager.create_groq_provider(
-                api_key=groq_key,
-                model="llama-3.1-8b-instant",  # Быстрая модель, доступна на free tier
-                set_as_default=True,
-                temperature=0.7,
-                max_tokens=1500
-            )
-            bot_logger.info("✅ AI Manager initialized with Groq (Llama 3.3 70B)")
-            ai_initialized = True
-
-        # 2. Пробуем OpenRouter (бесплатные модели!)
-        elif openrouter_key:
+        # 1. Пробуем OpenRouter (работает из РФ, бесплатные модели)
+        if openrouter_key:
             ai_manager.create_openrouter_provider(
                 api_key=openrouter_key,
                 model="meta-llama/llama-3.1-8b-instruct:free",  # Хороший баланс
@@ -87,7 +75,19 @@ async def on_startup(bot: Bot):
             bot_logger.info("✅ AI Manager initialized with OpenRouter (FREE models)")
             ai_initialized = True
 
-        # 2. Fallback на OpenAI (если нет OpenRouter)
+        # 2. Fallback на Groq (заблокирован из РФ, но оставляем)
+        elif groq_key:
+            ai_manager.create_groq_provider(
+                api_key=groq_key,
+                model="llama-3.1-8b-instant",
+                set_as_default=True,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            bot_logger.info("✅ AI Manager initialized with Groq")
+            ai_initialized = True
+
+        # 3. Fallback на OpenAI
         elif openai_key:
             ai_manager.create_openai_provider(
                 api_key=openai_key,
@@ -99,7 +99,7 @@ async def on_startup(bot: Bot):
             bot_logger.info("✅ AI Manager initialized with OpenAI")
             ai_initialized = True
 
-        # 3. Fallback на Anthropic
+        # 4. Fallback на Anthropic
         elif anthropic_key:
             ai_manager.create_anthropic_provider(
                 api_key=anthropic_key,
