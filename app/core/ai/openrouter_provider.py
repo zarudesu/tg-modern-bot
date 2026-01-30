@@ -17,13 +17,11 @@ from ...utils.logger import bot_logger
 
 # Бесплатные модели на OpenRouter (лимиты могут меняться)
 FREE_MODELS = [
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "google/gemma-2-9b-it:free",
-    "qwen/qwen-2-7b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
-    "microsoft/phi-3-mini-128k-instruct:free",
-    "huggingfaceh4/zephyr-7b-beta:free",
+    "google/gemma-3n-e2b-it:free",
+    "deepseek/deepseek-r1-0528:free",
+    "qwen/qwen3-coder:free",
+    "nvidia/nemotron-nano-9b-v2:free",
+    "openai/gpt-oss-20b:free",
 ]
 
 # Рекомендуемые модели по задачам

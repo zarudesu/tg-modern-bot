@@ -66,7 +66,7 @@ async def on_startup(bot: Bot):
         if openrouter_key:
             ai_manager.create_openrouter_provider(
                 api_key=openrouter_key,
-                model="meta-llama/llama-3.1-8b-instruct:free",  # Хороший баланс
+                model="google/gemma-3n-e2b-it:free",  # Бесплатная, работает из РФ
                 set_as_default=True,
                 temperature=0.7,
                 max_tokens=1500,
