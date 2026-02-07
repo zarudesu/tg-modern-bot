@@ -219,11 +219,36 @@ Each module MUST have filters in `filters.py` to prevent message conflicts. Test
 
 | Service | Details |
 |---------|---------|
-| Server | `ssh hhivp@rd.hhivp.com`, bot at `/opt/tg-modern-bot` |
+| Server | `ssh hhivp@rd.hhivp.com` (alias: `ssh rd`), bot at `/home/hhivp/tg-bot-prod/` |
 | Bot webhook | Port **8083** (ext) → 8080 (int) |
 | n8n | https://n8n.hhivp.com |
 | Plane.so | https://plane.hhivp.com |
 | TG Group | `-1001682373643` (Topic: 2231 for Plane) |
+
+### Infrastructure (hhivp-devops)
+
+Бот работает на инфраструктуре HHIVP. Документация инфраструктуры — в отдельном репозитории.
+
+| Ресурс | URL / Расположение | Назначение |
+|--------|---------------------|------------|
+| **hhivp-devops repo** | `~/Projects/hhivp-devops` (GitHub: `zarudesu/hhivp_devops`) | Документация инфраструктуры, inventory, credentials |
+| **Server docs** | `hhivp-devops/infrastructure/servers/rd.hhivp.com.md` | Полное описание rd.hhivp.com (Docker host бота) |
+| **Monitoring** | https://monitoring.hhivp.com | Grafana + Prometheus (метрики сервера и контейнеров) |
+| **Logs** | Loki через Grafana | `{host="rd.hhivp.com"}` — логи контейнеров через Promtail |
+| **Uptime** | https://kuma.hhivp.com | Uptime Kuma (мониторинг доступности сервисов) |
+| **Zabbix** | https://45.10.53.208 | Системный мониторинг (CPU, RAM, disk) |
+| **DNS** | `hhivp-devops/dns/dnsconfig.js` | DNS записи n8n.hhivp.com, plane.hhivp.com и др. |
+| **Credentials** | `hhivp-devops/.env.servers` | Пароли серверов, API ключи Grafana/Zabbix/n8n |
+| **SSH ключ** | `~/.ssh/id_ed25519_hhivp` | Доступ к rd.hhivp.com и остальным серверам HHIVP |
+
+**Сетевая топология на rd.hhivp.com:**
+```
+Internet → nginx (443) → /bot/ → localhost:8083 → telegram-bot-app:8080
+                        → /     → n8n:5678
+Plane.so → n8n webhook → n8n workflow → HTTP POST → localhost:8080/webhooks/task-completed
+```
+
+**Важно:** n8n и бот в **разных Docker networks**. Для webhook-вызовов между ними используется IP хоста `45.10.53.234`, а не имя контейнера.
 
 ---
 
@@ -282,9 +307,18 @@ python3 test_email_fix.py
 | [`docs/guides/support-requests-guide.md`](docs/guides/support-requests-guide.md) | Support module |
 | [`docs/guides/ai-integration-guide.md`](docs/guides/ai-integration-guide.md) | AI via n8n |
 | [`n8n-workflows/README.md`](n8n-workflows/README.md) | n8n workflows setup |
+| [`docs/DEPLOYMENT_PRODUCTION.md`](docs/DEPLOYMENT_PRODUCTION.md) | Production deploy на rd.hhivp.com |
+
+### Cross-repo (hhivp-devops)
+| File | Purpose |
+|------|---------|
+| `~/Projects/hhivp-devops/CLAUDE.md` | Общий контекст инфраструктуры, SSH доступ |
+| `~/Projects/hhivp-devops/infrastructure/servers/rd.hhivp.com.md` | Server docs (Docker host бота) |
+| `~/Projects/hhivp-devops/inventory/credentials-index.md` | Навигация по credentials |
+| `~/Projects/hhivp-devops/.env.servers` | Пароли серверов, API ключи |
 
 ---
 
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-07
 **Bot Version:** 3.0
 **Current Phase:** Phase 1 - Critical Fixes
