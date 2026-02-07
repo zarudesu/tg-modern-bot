@@ -2,7 +2,10 @@
 Обработчики базовых команд бота
 """
 from aiogram import Router, F
-from aiogram.types import Message, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import (
+    Message, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton,
+    CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+)
 from aiogram.filters import Command, CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -15,6 +18,18 @@ from ..utils.logger import bot_logger, log_user_action
 from ..config import settings
 
 router = Router()
+
+
+MAIN_MENU_TEXT = "🏠 Главное меню"
+
+
+def create_persistent_keyboard() -> ReplyKeyboardMarkup:
+    """Постоянная клавиатура внизу чата (всегда видна в личке)."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=MAIN_MENU_TEXT)]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def create_main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -121,11 +136,25 @@ async def start_command(message: Message, **kwargs):
             "👇 *Выберите действие:*"
         )
         
-        await message.answer(
-            welcome_text, 
-            parse_mode="MarkdownV2",
-            reply_markup=create_main_menu_keyboard()
-        )
+        # Set persistent reply keyboard (stays at bottom in DM)
+        if message.chat.type == "private":
+            await message.answer(
+                welcome_text,
+                parse_mode="MarkdownV2",
+                reply_markup=create_persistent_keyboard(),
+            )
+            # Inline menu as separate message (can't combine with ReplyKeyboard)
+            await message.answer(
+                "👇 *Быстрые действия:*",
+                parse_mode="MarkdownV2",
+                reply_markup=create_main_menu_keyboard(),
+            )
+        else:
+            await message.answer(
+                welcome_text,
+                parse_mode="MarkdownV2",
+                reply_markup=create_main_menu_keyboard(),
+            )
             
     except Exception as e:
         bot_logger.error(f"Start command error: {e}")
@@ -135,10 +164,23 @@ async def start_command(message: Message, **kwargs):
         )
 
 
-# Команды отключены и перенесены в модули
-# @router.message(Command("plane_test"))
-# async def cmd_plane_test(message: Message):
-#     """Перенаправление команды /plane_test в daily_tasks - УДАЛЕНО, теперь в модулях"""
+@router.message(F.text == MAIN_MENU_TEXT)
+async def handle_main_menu_button(message: Message):
+    """Обработчик кнопки 'Главное меню' (persistent reply keyboard)."""
+    if message.chat.type != "private":
+        return
+
+    welcome_text = (
+        "🏠 *Главное меню*\n\n"
+        "🤖 `/plane` \\— AI\\-ассистент по задачам\n"
+        "✈️ Задачи \\| 📋 Журнал \\| 📊 Отчёты\n\n"
+        "👇 *Выберите действие:*"
+    )
+    await message.answer(
+        welcome_text,
+        parse_mode="MarkdownV2",
+        reply_markup=create_main_menu_keyboard(),
+    )
 
 
 @router.message(Command("help"))
