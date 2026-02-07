@@ -366,6 +366,16 @@ async def main():
         dp.include_router(ai_export_router)
         bot_logger.info("✅ AI Training Export module loaded")
 
+        # 7.7. System Diagnostics - /diag command
+        from .handlers.diagnostics import router as diag_router
+        dp.include_router(diag_router)
+        bot_logger.info("✅ Diagnostics module loaded")
+
+        # 7.8. AI Quality Analytics - /ai_quality command
+        from .handlers.ai_quality import router as ai_quality_router
+        dp.include_router(ai_quality_router)
+        bot_logger.info("✅ AI Quality module loaded")
+
         # 8. Chat Support module - /request and /task commands
         from .modules.chat_support.router import router as chat_support_router
         dp.include_router(chat_support_router)

@@ -145,8 +145,29 @@ cmd_status() {
     $SSH_CMD "docker ps --filter name=${BOT_CONTAINER} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
 }
 
+cmd_test() {
+    log_info "Running pre-deploy tests..."
+    python3 -m pytest tests/unit/ tests/integration/ -v --tb=short -q
+    if [ $? -ne 0 ]; then
+        log_error "Tests FAILED! Aborting deployment."
+        exit 1
+    fi
+    log_success "All tests passed"
+}
+
+cmd_diag() {
+    log_info "Remote health check..."
+    $SSH_CMD "curl -s http://localhost:8083/health" | python3 -m json.tool
+    echo ""
+    cmd_status
+}
+
 cmd_full() {
     log_info "Starting FULL deployment..."
+    echo ""
+
+    # 0. Run tests first
+    cmd_test
     echo ""
 
     # 1. Push to GitHub
@@ -201,8 +222,10 @@ COMMANDS:
     restart           Restart bot container (no code changes)
     logs              View bot logs
     status            Check bot container status
-    full              Full deployment (push + pull + build + rebuild)
+    full              Full deployment (test + push + pull + build + rebuild)
     quick             Quick deployment (push + pull + restart)
+    test              Run pre-deploy pytest suite (unit + integration)
+    diag              Remote health check (webhook + container status)
     help              Show this help message
 
 OPTIONS:
@@ -276,6 +299,12 @@ case $COMMAND in
         ;;
     quick)
         cmd_quick
+        ;;
+    test)
+        cmd_test
+        ;;
+    diag)
+        cmd_diag
         ;;
     help|--help|-h|"")
         cmd_help

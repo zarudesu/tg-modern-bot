@@ -1,0 +1,6 @@
+# Testing dependencies (dev-only, not needed in Docker)
+pytest==8.2.2
+pytest-asyncio==0.23.7
+pytest-cov==5.0.0
+aioresponses==0.7.6
+aiosqlite==0.20.0

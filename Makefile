@@ -1,6 +1,6 @@
 # Makefile для HHIVP IT Assistant Bot
 
-.PHONY: help install dev-install test clean build
+.PHONY: help install dev-install test test-all test-integration test-coverage clean build
 .PHONY: db-up db-down db-logs db-shell db-backup db-restore
 .PHONY: bot-up bot-down bot-logs bot-shell bot-start bot-stop bot-restart bot-status bot-rebuild bot-rebuild-clean
 .PHONY: dev dev-stop dev-restart
@@ -78,7 +78,17 @@ dev-install: install
 	./venv/bin/pip install black flake8 mypy pytest pytest-asyncio
 
 test:
-	python3 test_basic.py
+	python3 -m pytest tests/unit/ -v --tb=short
+
+test-all:
+	python3 -m pytest tests/unit/ tests/integration/ -v --tb=short --cov=app --cov-report=term-missing
+
+test-integration:
+	python3 -m pytest tests/integration/ -v --tb=short
+
+test-coverage:
+	python3 -m pytest tests/unit/ tests/integration/ --cov=app --cov-report=html
+	@echo "Coverage report: htmlcov/index.html"
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
