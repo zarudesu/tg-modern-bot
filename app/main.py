@@ -361,17 +361,22 @@ async def main():
         dp.include_router(plane_audit_router)
         bot_logger.info("✅ Plane Audit module loaded")
 
-        # 7.6. AI Training Export - /ai_export command
+        # 7.6. Plane Assistant - /plane command (natural language AI)
+        from .modules.plane_assistant.router import router as plane_assistant_router
+        dp.include_router(plane_assistant_router)
+        bot_logger.info("✅ Plane Assistant module loaded")
+
+        # 7.7. AI Training Export - /ai_export command
         from .handlers.ai_training_export import router as ai_export_router
         dp.include_router(ai_export_router)
         bot_logger.info("✅ AI Training Export module loaded")
 
-        # 7.7. System Diagnostics - /diag command
+        # 7.8. System Diagnostics - /diag command
         from .handlers.diagnostics import router as diag_router
         dp.include_router(diag_router)
         bot_logger.info("✅ Diagnostics module loaded")
 
-        # 7.8. AI Quality Analytics - /ai_quality command
+        # 7.9. AI Quality Analytics - /ai_quality command
         from .handlers.ai_quality import router as ai_quality_router
         dp.include_router(ai_quality_router)
         bot_logger.info("✅ AI Quality module loaded")

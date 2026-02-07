@@ -375,6 +375,35 @@ class PlaneAPI:
             bot_logger.error(f"Error searching issues: {e}")
             return []
 
+    async def update_issue(
+        self,
+        project_id: str,
+        issue_id: str,
+        **fields
+    ) -> Optional[Dict[str, Any]]:
+        """Update issue fields (state, priority, assignees, name, etc.)."""
+        if not self.configured:
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.update_issue(
+                    session, project_id, issue_id, **fields
+                )
+        except Exception as e:
+            bot_logger.error(f"Error updating issue: {e}")
+            return None
+
+    async def get_project_states(self, project_id: str) -> List[Dict[str, Any]]:
+        """Get workflow states for a project (backlog, unstarted, started, completed, cancelled)."""
+        if not self.configured:
+            return []
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.get_project_states(session, project_id)
+        except Exception as e:
+            bot_logger.error(f"Error getting project states: {e}")
+            return []
+
 
 # Create global instance using settings
 from ...config import settings

@@ -618,3 +618,47 @@ class PlaneTasksManager:
         except Exception as e:
             bot_logger.error(f"Error in get_all_issues_for_audit: {e}")
             return []
+
+    async def update_issue(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        issue_id: str,
+        **fields
+    ) -> Optional[Dict]:
+        """Update issue fields via PATCH.
+
+        Supported fields: state (UUID), priority, assignees (list of UUIDs),
+        name, description_html.
+        """
+        try:
+            endpoint = (
+                f"/api/v1/workspaces/{self.client.workspace_slug}"
+                f"/projects/{project_id}/issues/{issue_id}/"
+            )
+            return await self.client.patch(session, endpoint, json_data=fields)
+        except Exception as e:
+            bot_logger.error(f"Error updating issue {issue_id}: {e}")
+            return None
+
+    async def get_project_states(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str
+    ) -> List[Dict]:
+        """Get all workflow states for a project.
+
+        Returns list of dicts with id, name, group (backlog/unstarted/started/completed/cancelled).
+        """
+        try:
+            endpoint = (
+                f"/api/v1/workspaces/{self.client.workspace_slug}"
+                f"/projects/{project_id}/states/"
+            )
+            data = await self.client.get(session, endpoint)
+            if isinstance(data, dict):
+                return data.get('results', [])
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            bot_logger.error(f"Error getting states for project {project_id}: {e}")
+            return []

@@ -33,6 +33,12 @@ class AutoTaskDetectionHandler(EventHandler):
         if not isinstance(event, MessageReceivedEvent):
             return
 
+        # Only detect tasks in chats mapped to Plane projects (not client chats)
+        from ..chat_monitor.message_monitor import get_chat_plane_mapping
+        mapping = await get_chat_plane_mapping(event.chat_id)
+        if not mapping:
+            return
+
         message = event.data.get("message")
         text = event.data.get("text")
 
@@ -178,12 +184,12 @@ class ChatSummaryHandler(EventHandler):
 # Регистрируем обработчики при загрузке модуля
 async def register_ai_handlers():
     """Регистрация AI обработчиков событий"""
-    # AutoTaskDetectionHandler DISABLED — дублирует n8n путь и не фильтрует чаты,
-    # отправляя "Обнаружена задача!" в клиентские чаты. n8n путь корректно
-    # фильтрует через ChatPlaneMapping + поддерживает контекст и дедупликацию.
-    # event_bus.register_handler(AutoTaskDetectionHandler())
+    # AutoTaskDetection re-enabled with ChatPlaneMapping filter —
+    # only triggers in chats mapped to Plane projects (internal chats),
+    # not in client chats.
+    event_bus.register_handler(AutoTaskDetectionHandler())
     event_bus.register_handler(ChatSummaryHandler())
-    bot_logger.info("AI event handlers registered (AutoTaskDetection disabled, using n8n path)")
+    bot_logger.info("AI event handlers registered (AutoTaskDetection + ChatPlaneMapping filter)")
 
 
 # Вызываем регистрацию при импорте

@@ -61,7 +61,7 @@ async def _check_plane() -> dict:
 
     result = await plane_api.test_connection()
     if result.get("success"):
-        projects = await plane_api.get_projects()
+        projects = await plane_api.get_all_projects()
         project_count = len(projects) if projects else 0
         return {
             "ok": True,
@@ -130,10 +130,10 @@ async def cmd_diag(message: Message):
     Checks: Database, Redis, Plane API, Webhook, AI, Migrations.
     """
     if not settings.is_admin(message.from_user.id):
-        await message.answer("Admin only")
+        await message.answer("Admin only", parse_mode=None)
         return
 
-    status_msg = await message.answer("Running diagnostics...")
+    status_msg = await message.answer("Running diagnostics...", parse_mode=None)
 
     checks = [
         ("Database", _check_database),
@@ -175,4 +175,4 @@ async def cmd_diag(message: Message):
         await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
     except Exception as e:
         bot_logger.error(f"Error sending diag report: {e}")
-        await status_msg.edit_text(f"Diagnostics error: {e}")
+        await status_msg.edit_text(f"Diagnostics error: {e}", parse_mode=None)
