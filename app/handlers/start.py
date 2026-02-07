@@ -14,7 +14,7 @@ from datetime import datetime
 
 from ..database.database import get_async_session
 from ..database.models import BotUser
-from ..utils.formatters import format_help_message, format_user_profile, escape_markdown
+from ..utils.formatters import format_help_message, format_about_message, format_user_profile, escape_markdown
 from ..utils.logger import bot_logger, log_user_action
 from ..config import settings
 
@@ -34,24 +34,51 @@ def create_persistent_keyboard() -> ReplyKeyboardMarkup:
 
 
 def create_main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Создание основной клавиатуры с частыми функциями"""
-    keyboard = [
+    """Главное меню — 4 ряда, чистое и понятное"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 Plane AI", callback_data="start_plane_ai")],
         [
-            InlineKeyboardButton(text="🤖 Plane AI ассистент", callback_data="start_plane_ai")
+            InlineKeyboardButton(text="✈️ Задачи", callback_data="daily_tasks"),
+            InlineKeyboardButton(text="📋 Журнал", callback_data="menu_journal"),
         ],
         [
-            InlineKeyboardButton(text="📋 Создать запись", callback_data="start_journal"),
-            InlineKeyboardButton(text="📊 История работ", callback_data="show_history")
+            InlineKeyboardButton(text="🔧 Инструменты", callback_data="menu_tools"),
+            InlineKeyboardButton(text="📖 О боте", callback_data="about_bot"),
+        ],
+    ])
+
+
+def create_journal_keyboard() -> InlineKeyboardMarkup:
+    """Подменю журнала работ"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📝 Новая запись", callback_data="start_journal"),
+            InlineKeyboardButton(text="📊 История", callback_data="show_history"),
         ],
         [
-            InlineKeyboardButton(text="✈️ Мои задачи", callback_data="daily_tasks")
+            InlineKeyboardButton(text="📈 Отчёты", callback_data="show_reports"),
+            InlineKeyboardButton(text="🔄 Sheets", callback_data="sheets_sync_menu"),
+        ],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="start_menu")],
+    ])
+
+
+def create_tools_keyboard() -> InlineKeyboardMarkup:
+    """Подменю инструментов"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🩺 Диагностика", callback_data="run_diag"),
+            InlineKeyboardButton(text="📊 Plane статус", callback_data="run_plane_status"),
+        ],
+        [
+            InlineKeyboardButton(text="🔍 Plane аудит", callback_data="run_plane_audit"),
         ],
         [
             InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings"),
-            InlineKeyboardButton(text="❓ Справка", callback_data="show_help")
-        ]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+            InlineKeyboardButton(text="👤 Профиль", callback_data="show_profile"),
+        ],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="start_menu")],
+    ])
 
 
 async def get_or_create_user(session: AsyncSession, message: Message) -> BotUser:
@@ -128,13 +155,9 @@ async def start_command(message: Message, **kwargs):
         welcome_text = f"👋 *{username}*, добро пожаловать\\!\n\n"
 
         welcome_text += (
-            "🤖 *Plane AI* \\— спроси что угодно о задачах\n"
-            "  `/plane чем заняться?`\n\n"
-            "☀️ *Утренний дайджест* \\— каждый день в 09:00\n"
-            "📋 *Журнал работ* \\+ отчёты \\+ Google Sheets\n"
-            "📝 *Заявки* из групповых чатов → Plane\n"
-            "🔧 *Диагностика:* `/diag`\n\n"
-            "👇 *Выберите действие:*"
+            "🤖 *Plane AI* — `/plane чем заняться?`\n"
+            "✈️ *Задачи* \\| 📋 *Журнал* \\| 🔧 *Инструменты*\n\n"
+            "Нажми *📖 О боте* для полного обзора"
         )
         
         # Set persistent reply keyboard (stays at bottom in DM)
@@ -172,10 +195,7 @@ async def handle_main_menu_button(message: Message):
         return
 
     welcome_text = (
-        "🏠 *Главное меню*\n\n"
-        "🤖 `/plane` \\— AI\\-ассистент по задачам\n"
-        "✈️ Задачи \\| 📋 Журнал \\| 📊 Отчёты\n\n"
-        "👇 *Выберите действие:*"
+        "🏠 *Главное меню*"
     )
     await message.answer(
         welcome_text,
@@ -268,6 +288,87 @@ async def callback_main_menu(callback_query: CallbackQuery):
     except Exception as e:
         bot_logger.error(f"Main menu callback error: {e}")
         await callback_query.answer("❌ Ошибка при открытии меню", show_alert=True)
+
+
+@router.callback_query(F.data == "menu_journal")
+async def callback_menu_journal(callback: CallbackQuery):
+    """Подменю журнала работ"""
+    await callback.answer()
+    await callback.message.answer(
+        "📋 <b>Журнал работ</b>\n\n"
+        "Записи о выполненных работах, отчёты\n"
+        "и синхронизация с Google Sheets.",
+        parse_mode="HTML",
+        reply_markup=create_journal_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "menu_tools")
+async def callback_menu_tools(callback: CallbackQuery):
+    """Подменю инструментов"""
+    await callback.answer()
+    await callback.message.answer(
+        "🔧 <b>Инструменты</b>\n\n"
+        "Диагностика, аналитика Plane,\n"
+        "настройки и профиль.",
+        parse_mode="HTML",
+        reply_markup=create_tools_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "run_diag")
+async def callback_run_diag(callback: CallbackQuery):
+    """Запуск /diag через кнопку"""
+    await callback.answer()
+    from ..handlers.diagnostics import cmd_diag
+
+    fake_message = type('FakeMessage', (), {
+        'from_user': callback.from_user,
+        'reply': callback.message.answer,
+        'answer': callback.message.answer,
+        'text': '/diag',
+    })()
+    await cmd_diag(fake_message)
+
+
+@router.callback_query(F.data == "run_plane_status")
+async def callback_run_plane_status(callback: CallbackQuery):
+    """Запуск /plane_status через кнопку"""
+    await callback.answer()
+    from ..handlers.plane_analysis import cmd_plane_status
+
+    fake_message = type('FakeMessage', (), {
+        'from_user': callback.from_user,
+        'reply': callback.message.answer,
+        'answer': callback.message.answer,
+        'text': '/plane_status',
+    })()
+    await cmd_plane_status(fake_message)
+
+
+@router.callback_query(F.data == "run_plane_audit")
+async def callback_run_plane_audit(callback: CallbackQuery):
+    """Запуск /plane_audit через кнопку"""
+    await callback.answer()
+    from ..handlers.plane_audit import cmd_plane_audit
+
+    fake_message = type('FakeMessage', (), {
+        'from_user': callback.from_user,
+        'reply': callback.message.answer,
+        'answer': callback.message.answer,
+        'text': '/plane_audit',
+    })()
+    await cmd_plane_audit(fake_message)
+
+
+@router.callback_query(F.data == "about_bot")
+async def callback_about_bot(callback: CallbackQuery):
+    """Полное описание всех функций бота"""
+    await callback.answer()
+    await callback.message.answer(
+        format_about_message(),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "show_settings")
@@ -659,12 +760,7 @@ async def callback_show_main_menu(callback: CallbackQuery):
             
             username = escape_markdown(user.first_name or "Администратор")
 
-            welcome_text = (
-                f"🏠 *{username}*, главное меню\n\n"
-                "🤖 `/plane` \\— AI\\-ассистент по задачам\n"
-                "✈️ Задачи \\| 📋 Журнал \\| 📊 Отчёты\n\n"
-                "👇 *Выберите действие:*"
-            )
+            welcome_text = f"🏠 *{username}*, главное меню"
             
             await callback.message.answer(
                 welcome_text,
