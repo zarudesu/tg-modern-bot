@@ -257,12 +257,12 @@ async def callback_main_menu(callback_query: CallbackQuery):
             "👇 *Выберите действие:*"
         )
 
-        await callback_query.message.edit_text(
+        await callback_query.answer()
+        await callback_query.message.answer(
             welcome_text,
             reply_markup=create_main_menu_keyboard(),
             parse_mode="MarkdownV2"
         )
-        await callback_query.answer()
 
     except Exception as e:
         bot_logger.error(f"Main menu callback error: {e}")
@@ -311,12 +311,12 @@ async def callback_settings(callback_query: CallbackQuery):
                 f"Выберите раздел настроек:"
             )
 
-            await callback_query.message.edit_text(
+            await callback_query.answer()
+            await callback_query.message.answer(
                 settings_text,
                 reply_markup=settings_keyboard,
                 parse_mode="MarkdownV2"
             )
-            await callback_query.answer()
 
     except Exception as e:
         bot_logger.error(f"Settings callback error: {e}")
@@ -676,8 +676,8 @@ async def callback_show_main_menu(callback: CallbackQuery):
                 "👇 *Выберите действие:*"
             )
             
-            await callback.message.edit_text(
-                welcome_text, 
+            await callback.message.answer(
+                welcome_text,
                 parse_mode="MarkdownV2",
                 reply_markup=create_main_menu_keyboard()
             )
