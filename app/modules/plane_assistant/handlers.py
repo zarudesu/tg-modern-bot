@@ -113,27 +113,41 @@ def _extract_action(ai_text: str) -> tuple:
     """Extract JSON action block from AI response.
     Returns (clean_text, action_dict_or_None).
     """
-    # Try ```json block
-    match = re.search(r'```json\s*(\{[^}]+\})\s*```', ai_text)
+    # Try ```json block (multiline, greedy inner braces)
+    match = re.search(r'```json\s*(\{.*?\})\s*```', ai_text, re.DOTALL)
     if match:
         try:
             action = json.loads(match.group(1))
-            clean = ai_text[:match.start()].strip()
-            return clean, action
+            if "action" in action:
+                clean = (ai_text[:match.start()] + ai_text[match.end():]).strip()
+                return clean, action
         except json.JSONDecodeError:
             pass
 
-    # Try inline JSON with "action" key
-    match2 = re.search(r'\{"action"\s*:\s*"[^"]+?"[^}]*\}', ai_text)
-    if match2:
+    # Try ``` block without json label
+    match1b = re.search(r'```\s*(\{"action".*?\})\s*```', ai_text, re.DOTALL)
+    if match1b:
         try:
-            action = json.loads(match2.group(0))
-            clean = ai_text[:match2.start()].strip()
+            action = json.loads(match1b.group(1))
+            clean = (ai_text[:match1b.start()] + ai_text[match1b.end():]).strip()
             return clean, action
         except json.JSONDecodeError:
             pass
 
-    return ai_text, None
+    # Try inline JSON with "action" key (balanced braces)
+    for m in re.finditer(r'\{[^{}]*"action"\s*:[^{}]*\}', ai_text):
+        try:
+            action = json.loads(m.group(0))
+            clean = (ai_text[:m.start()] + ai_text[m.end():]).strip()
+            return clean, action
+        except json.JSONDecodeError:
+            continue
+
+    # Final cleanup: remove any leftover JSON-like blocks that AI might have emitted
+    cleaned = re.sub(r'```json\s*\{.*?\}\s*```', '', ai_text, flags=re.DOTALL).strip()
+    cleaned = re.sub(r'```\s*\{.*?\}\s*```', '', cleaned, flags=re.DOTALL).strip()
+
+    return cleaned, None
 
 
 def _classify_query(msg: str) -> str:
