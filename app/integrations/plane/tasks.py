@@ -447,14 +447,14 @@ class PlaneTasksManager:
             endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/"
 
             # Prepare issue data
-            # Plane requires description_html for rich text
-            description_html = f"<p>{description}</p>" if description else ""
-
             issue_data = {
                 "name": name,
-                "description_html": description_html,
                 "priority": priority,
             }
+
+            # Plane requires valid HTML in description_html; omit if empty
+            if description:
+                issue_data["description_html"] = f"<p>{description}</p>"
 
             # Add labels if provided
             if labels:
