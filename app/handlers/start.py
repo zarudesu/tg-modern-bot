@@ -7,6 +7,7 @@ from aiogram.types import (
     CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
 )
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime
@@ -538,7 +539,7 @@ async def callback_show_help(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "start_plane_ai")
-async def callback_start_plane_ai(callback: CallbackQuery):
+async def callback_start_plane_ai(callback: CallbackQuery, state: FSMContext):
     """Обработчик кнопки 'Plane AI ассистент' — вход в /plane режим"""
     await callback.answer()
 
@@ -549,19 +550,8 @@ async def callback_start_plane_ai(callback: CallbackQuery):
 
     try:
         from ..modules.plane_assistant.states import PlaneAssistantStates
-        from aiogram.fsm.context import FSMContext
-        from aiogram.fsm.storage.base import StorageKey
 
-        # Получаем FSM контекст
-        storage = callback.bot.fsm.storage if hasattr(callback.bot, 'fsm') else None
-        if storage:
-            state_key = StorageKey(
-                bot_id=callback.bot.id,
-                chat_id=callback.message.chat.id,
-                user_id=user_id
-            )
-            state = FSMContext(storage=storage, key=state_key)
-            await state.set_state(PlaneAssistantStates.conversation)
+        await state.set_state(PlaneAssistantStates.conversation)
 
         help_text = (
             "<b>Plane AI Assistant</b>\n\n"
