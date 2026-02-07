@@ -54,12 +54,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    ports:
+      - "8083:8080"  # Webhook server (n8n, Plane integrations)
     volumes:
       - ./logs:/app/logs
     networks:
       - hhivp-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/health')"]
       interval: 60s
       timeout: 30s
       retries: 3
