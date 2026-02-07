@@ -244,6 +244,16 @@ class N8nAIService:
             bot_logger.debug(f"Skipping AI analysis: {reason}")
             return False, {"skipped": reason}
 
+        # Получаем контекст чата (последние 20 сообщений)
+        context_text = ""
+        try:
+            from .chat_context_service import chat_context_service
+            context_text = await chat_context_service.get_context_as_text(
+                chat_id=message.chat.id, limit=20
+            )
+        except Exception as e:
+            bot_logger.warning(f"Failed to get chat context: {e}")
+
         # Собираем данные для n8n
         data = {
             "source": "telegram_bot",
@@ -268,6 +278,7 @@ class N8nAIService:
                 "project_id": plane_project_id,
                 "project_name": plane_project_name,
             },
+            "context_messages": context_text or "",
             "reply_to": None
         }
 

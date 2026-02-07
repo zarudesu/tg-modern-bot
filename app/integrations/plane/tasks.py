@@ -484,3 +484,67 @@ class PlaneTasksManager:
         except Exception as e:
             bot_logger.error(f"❌ Error creating issue: {e}")
             return None
+
+    async def search_open_issues(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        search_text: str,
+        limit: int = 5
+    ) -> List[Dict]:
+        """
+        Search for open issues by text match in name/description.
+
+        Args:
+            session: aiohttp session
+            project_id: Plane project UUID
+            search_text: Text to search for (case-insensitive substring)
+            limit: Max results to return
+
+        Returns:
+            List of matching issues (id, sequence_id, name, state, assignees)
+        """
+        try:
+            issues = await self._get_project_issues(
+                session, project_id, assigned_only=False
+            )
+
+            if not issues:
+                return []
+
+            search_lower = search_text.lower()
+            # Split search into keywords for better matching
+            keywords = [w for w in search_lower.split() if len(w) > 2]
+
+            scored = []
+            for task in issues:
+                name_lower = (task.name or "").lower()
+                desc_lower = (task.description or "").lower()
+                text = f"{name_lower} {desc_lower}"
+
+                # Count keyword matches
+                score = sum(1 for kw in keywords if kw in text)
+                if score > 0:
+                    scored.append((score, task))
+
+            # Sort by score descending, take top N
+            scored.sort(key=lambda x: x[0], reverse=True)
+
+            results = []
+            for score, task in scored[:limit]:
+                results.append({
+                    "id": task.id,
+                    "sequence_id": task.sequence_id,
+                    "name": task.name,
+                    "state_name": task.state_name,
+                    "assignee_names": task.assignee_names,
+                    "priority": task.priority,
+                    "updated_at": task.updated_at,
+                    "score": score
+                })
+
+            return results
+
+        except Exception as e:
+            bot_logger.error(f"Error searching issues: {e}")
+            return []

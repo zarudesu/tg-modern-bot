@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "mistralai/devstral-2512:free",
         "options": {
           "temperature": 0.3,
           "maxTokens": 500
@@ -55,11 +55,11 @@
           "values": [
             {
               "role": "system",
-              "content": "You are a task detection assistant for an IT support team. Analyze messages from group chats and determine if they contain actionable tasks or requests.\n\nRESPOND ONLY WITH JSON in this exact format:\n{\n  \"is_task\": true/false,\n  \"confidence\": 0-100,\n  \"task_data\": {\n    \"title\": \"Short task title (max 100 chars)\",\n    \"description\": \"Detailed description\",\n    \"priority\": \"urgent|high|medium|low\",\n    \"due_date\": null or \"YYYY-MM-DD\"\n  },\n  \"reasoning\": \"Brief explanation why this is/isn't a task\"\n}\n\nTask indicators:\n- Direct requests (\"нужно\", \"сделай\", \"проверь\", \"настрой\")\n- Problem reports (\"не работает\", \"ошибка\", \"проблема\")\n- Questions requiring action (\"можно ли\", \"как сделать\")\n- Deadlines or urgency markers\n\nNOT tasks:\n- General discussions\n- Status updates without action needed\n- Greetings, small talk\n- Already completed items"
+              "content": "You are a task detection assistant for an IT support team. Analyze messages from group chats and determine if they contain actionable tasks or requests.\n\nYou will receive the RECENT CHAT CONTEXT (last 20 messages) and the NEW MESSAGE. Use context to understand the situation better.\n\nRESPOND ONLY WITH JSON in this exact format:\n{\n  \"is_task\": true/false,\n  \"confidence\": 0-100,\n  \"task_data\": {\n    \"title\": \"Short task title in Russian (max 100 chars)\",\n    \"description\": \"Detailed description including context from chat\",\n    \"priority\": \"urgent|high|medium|low\",\n    \"due_date\": null or \"YYYY-MM-DD\"\n  },\n  \"reasoning\": \"Brief explanation why this is/isn't a task\"\n}\n\nTask indicators:\n- Direct requests (\"нужно\", \"сделай\", \"проверь\", \"настрой\")\n- Problem reports (\"не работает\", \"ошибка\", \"проблема\")\n- Questions requiring action (\"можно ли\", \"как сделать\")\n- Deadlines or urgency markers\n\nNOT tasks:\n- General discussions\n- Status updates without action needed\n- Greetings, small talk\n- Already completed items\n- Messages where the problem is already being resolved (check context)\n- Repeated mentions of the same issue already discussed\n\nCONTEXT RULES:\n- Use chat context to understand if the problem is new or already discussed\n- If the same issue was mentioned before in context, lower confidence\n- If context shows the issue is being resolved, set is_task=false\n- Include relevant context in the task description"
             },
             {
               "role": "user",
-              "content": "=Analyze this message from chat \"{{ $json.chat.title }}\":\n\nFrom: {{ $json.user.name }} (@{{ $json.user.username }})\nMessage: {{ $json.message.text }}\n\n{{ $json.reply_to ? 'Reply to: ' + $json.reply_to.text : '' }}"
+              "content": "=== RECENT CHAT CONTEXT (last 20 messages) ===\n{{ $json.context_messages || 'No context available' }}\n=== END CONTEXT ===\n\nNEW MESSAGE from chat \"{{ $json.chat.title }}\":\nFrom: {{ $json.user.name }} (@{{ $json.user.username }})\nMessage: {{ $json.message.text }}\n\n{{ $json.reply_to ? 'Reply to: ' + $json.reply_to.text : '' }}"
             }
           ]
         }
@@ -78,7 +78,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse AI response\nconst aiResponse = $input.first().json.message.content;\nconst originalData = $('Webhook: Detect Task').first().json;\n\nlet parsed;\ntry {\n  // Extract JSON from response (handle markdown code blocks)\n  let jsonStr = aiResponse;\n  if (aiResponse.includes('```json')) {\n    jsonStr = aiResponse.split('```json')[1].split('```')[0].trim();\n  } else if (aiResponse.includes('```')) {\n    jsonStr = aiResponse.split('```')[1].split('```')[0].trim();\n  }\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  // If parsing fails, assume not a task\n  parsed = {\n    is_task: false,\n    confidence: 0,\n    reasoning: 'Failed to parse AI response: ' + e.message\n  };\n}\n\n// Determine action based on confidence\nlet action = 'ignored';\nif (parsed.is_task && parsed.confidence >= 75) {\n  action = 'auto_create';  // High confidence - auto create\n} else if (parsed.is_task && parsed.confidence >= 50) {\n  action = 'pending_confirmation';  // Medium - ask user\n} else {\n  action = 'ignored';  // Low or not a task\n}\n\nreturn {\n  json: {\n    source: 'n8n_ai',\n    event_type: 'task_detection_result',\n    timestamp: new Date().toISOString(),\n    detection: {\n      is_task: parsed.is_task,\n      confidence: parsed.confidence,\n      task_data: parsed.task_data || null,\n      reasoning: parsed.reasoning\n    },\n    original_message: {\n      chat_id: originalData.chat.id,\n      message_id: originalData.message.message_id,\n      text: originalData.message.text,\n      user_id: originalData.user.id,\n      user_name: originalData.user.name\n    },\n    plane: originalData.plane,\n    action_taken: action\n  }\n};"
+        "jsCode": "// Parse AI response\nconst aiResponse = $input.first().json.message.content;\nconst originalData = $('Webhook: Detect Task').first().json;\n\nlet parsed;\ntry {\n  let jsonStr = aiResponse;\n  if (aiResponse.includes('```json')) {\n    jsonStr = aiResponse.split('```json')[1].split('```')[0].trim();\n  } else if (aiResponse.includes('```')) {\n    jsonStr = aiResponse.split('```')[1].split('```')[0].trim();\n  }\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  parsed = {\n    is_task: false,\n    confidence: 0,\n    reasoning: 'Failed to parse AI response: ' + e.message\n  };\n}\n\n// All decisions delegated to bot (dedup, create, comment)\nlet action = 'ignored';\nif (parsed.is_task && parsed.confidence >= 75) {\n  action = 'auto_create';  // Bot handles dedup + create\n} else if (parsed.is_task && parsed.confidence >= 50) {\n  action = 'pending_confirmation';  // Bot shows buttons\n} else {\n  action = 'ignored';\n}\n\nreturn {\n  json: {\n    source: 'n8n_ai',\n    event_type: 'task_detection_result',\n    timestamp: new Date().toISOString(),\n    detection: {\n      is_task: parsed.is_task,\n      confidence: parsed.confidence,\n      task_data: parsed.task_data || null,\n      reasoning: parsed.reasoning\n    },\n    original_message: {\n      chat_id: originalData.chat.id,\n      message_id: originalData.message.message_id,\n      text: originalData.message.text,\n      user_id: originalData.user.id,\n      user_name: originalData.user.name\n    },\n    plane: originalData.plane,\n    action_taken: action\n  }\n};"
       },
       "id": "parse-response",
       "name": "Parse AI Response",
@@ -96,12 +96,12 @@
           },
           "conditions": [
             {
-              "id": "condition-auto-create",
+              "id": "condition-not-ignored",
               "leftValue": "={{ $json.action_taken }}",
-              "rightValue": "auto_create",
+              "rightValue": "ignored",
               "operator": {
                 "type": "string",
-                "operation": "equals"
+                "operation": "notEquals"
               }
             }
           ],
@@ -109,48 +109,15 @@
         },
         "options": {}
       },
-      "id": "switch-action",
-      "name": "Switch: Action Type",
-      "type": "n8n-nodes-base.if",
+      "id": "filter-actionable",
+      "name": "Filter: Not Ignored",
+      "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
       "position": [1130, 300]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.PLANE_API_URL }}/api/v1/workspaces/{{ $env.PLANE_WORKSPACE }}/projects/{{ $json.plane.project_id }}/issues/",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"name\": \"{{ $json.detection.task_data.title }}\",\n  \"description_html\": \"<p>{{ $json.detection.task_data.description }}</p><hr/><p><em>Auto-created from Telegram chat</em></p><p>Author: {{ $json.original_message.user_name }}</p><p>Chat ID: {{ $json.original_message.chat_id }}</p>\",\n  \"priority\": \"{{ $json.detection.task_data.priority === 'urgent' ? 'urgent' : $json.detection.task_data.priority === 'high' ? 'high' : 'medium' }}\"\n}",
-        "options": {}
-      },
-      "id": "create-plane-issue",
-      "name": "Plane: Create Issue",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1350, 200],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "plane-api-creds",
-          "name": "Plane API"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Add created issue info to result\nconst result = $('Parse AI Response').first().json;\nconst createdIssue = $input.first().json;\n\nresult.action_taken = 'auto_created';\nresult.created_issue = {\n  id: createdIssue.id,\n  sequence_id: createdIssue.sequence_id\n};\n\nreturn { json: result };"
-      },
-      "id": "merge-created",
-      "name": "Merge: Add Issue Info",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1570, 200]
-    },
-    {
-      "parameters": {
-        "method": "POST",
         "url": "http://rd.hhivp.com:8083/webhooks/ai/task-result",
         "sendHeaders": true,
         "headerParameters": {
@@ -170,39 +137,11 @@
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {}
       },
-      "id": "callback-bot-created",
-      "name": "Callback: Bot (Created)",
+      "id": "callback-bot",
+      "name": "Callback: Bot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1790, 200]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://rd.hhivp.com:8083/webhooks/ai/task-result",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {}
-      },
-      "id": "callback-bot-pending",
-      "name": "Callback: Bot (Pending)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1350, 400]
+      "position": [1350, 300]
     },
     {
       "parameters": {
@@ -214,7 +153,7 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [2010, 300]
+      "position": [1570, 300]
     }
   ],
   "connections": {
@@ -255,65 +194,25 @@
       "main": [
         [
           {
-            "node": "Switch: Action Type",
+            "node": "Filter: Not Ignored",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Switch: Action Type": {
+    "Filter: Not Ignored": {
       "main": [
         [
           {
-            "node": "Plane: Create Issue",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Callback: Bot (Pending)",
+            "node": "Callback: Bot",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Plane: Create Issue": {
-      "main": [
-        [
-          {
-            "node": "Merge: Add Issue Info",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge: Add Issue Info": {
-      "main": [
-        [
-          {
-            "node": "Callback: Bot (Created)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Callback: Bot (Created)": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Callback: Bot (Pending)": {
+    "Callback: Bot": {
       "main": [
         [
           {

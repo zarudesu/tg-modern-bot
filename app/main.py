@@ -45,6 +45,11 @@ async def on_startup(bot: Bot):
         await init_db()
         bot_logger.info("✅ Database initialized")
 
+        # Инициализация Redis
+        from .services.redis_service import redis_service
+        await redis_service.connect(settings.redis_url)
+        bot_logger.info(f"✅ Redis initialized (connected={redis_service.is_connected})")
+
         # Запуск webhook server для n8n
         from .webhooks.server import WebhookServer
         global webhook_server
@@ -235,6 +240,10 @@ async def on_shutdown(bot: Bot):
             await scheduler.stop()
             bot_logger.info("Daily tasks scheduler stopped")
         
+        # Закрываем Redis
+        from .services.redis_service import redis_service
+        await redis_service.close()
+
         # Закрываем подключение к базе данных
         await close_db()
         bot_logger.info("Database connection closed")
@@ -342,7 +351,12 @@ async def main():
         dp.include_router(ai_assistant_router)
         bot_logger.info("✅ AI Assistant module loaded")
 
-        # 7. Chat Support module - /request and /task commands
+        # 7. Plane Analysis - /plane_status command
+        from .handlers.plane_analysis import router as plane_analysis_router
+        dp.include_router(plane_analysis_router)
+        bot_logger.info("✅ Plane Analysis module loaded")
+
+        # 8. Chat Support module - /request and /task commands
         from .modules.chat_support.router import router as chat_support_router
         dp.include_router(chat_support_router)
         bot_logger.info("✅ Chat Support module loaded")

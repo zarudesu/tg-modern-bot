@@ -25,6 +25,9 @@ class DailyTasksScheduler:
         self.check_interval = 60  # Проверка каждые 60 секунд
         self.cache_sync_interval = 1800  # Синхронизация кэша каждые 30 минут
         self.reminder_interval = 1800  # Проверка напоминаний каждые 30 минут
+        self.plane_analysis_task: Optional[asyncio.Task] = None
+        self.plane_analysis_hour = 9  # 09:00 MSK
+        self._last_plane_analysis_date = None
     
     async def start(self):
         """Запустить планировщик"""
@@ -37,7 +40,8 @@ class DailyTasksScheduler:
         # CACHE DISABLED: Direct API calls instead (rate limit 600/min)
         # self.sync_task = asyncio.create_task(self._cache_sync_loop())
         self.reminder_task = asyncio.create_task(self._reminders_loop())
-        bot_logger.info("Daily tasks scheduler and task reminders started (cache sync disabled)")
+        self.plane_analysis_task = asyncio.create_task(self._plane_analysis_loop())
+        bot_logger.info("Daily tasks scheduler, reminders and plane analysis started")
     
     async def stop(self):
         """Остановить планировщик"""
@@ -66,7 +70,14 @@ class DailyTasksScheduler:
             except asyncio.CancelledError:
                 pass
 
-        bot_logger.info("Daily tasks scheduler, cache sync and task reminders stopped")
+        if self.plane_analysis_task:
+            self.plane_analysis_task.cancel()
+            try:
+                await self.plane_analysis_task
+            except asyncio.CancelledError:
+                pass
+
+        bot_logger.info("All scheduler tasks stopped")
     
     async def _scheduler_loop(self):
         """Основной цикл планировщика"""
@@ -279,6 +290,136 @@ class DailyTasksScheduler:
                 bot_logger.error(traceback.format_exc())
                 # При ошибке ждем 5 минут и пробуем снова
                 await asyncio.sleep(300)
+
+    async def _plane_analysis_loop(self):
+        """Daily Plane analysis at 09:00 MSK."""
+        tz = pytz.timezone(settings.daily_tasks_timezone)
+
+        while self.running:
+            try:
+                now = datetime.now(tz)
+                today = now.date()
+
+                if (
+                    now.hour == self.plane_analysis_hour
+                    and self._last_plane_analysis_date != today
+                ):
+                    self._last_plane_analysis_date = today
+                    await self._run_plane_analysis()
+
+                await asyncio.sleep(60)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                bot_logger.error(f"Error in plane analysis loop: {e}")
+                await asyncio.sleep(300)
+
+    async def _run_plane_analysis(self):
+        """Fetch open issues and post AI summary to admin chat."""
+        from ..integrations.plane import plane_api
+        from ..core.ai.ai_manager import ai_manager
+
+        if not plane_api.configured:
+            return
+
+        chat_id = settings.plane_chat_id
+        topic_id = settings.plane_topic_id
+
+        if not chat_id:
+            bot_logger.warning("plane_chat_id not set, skipping scheduled analysis")
+            return
+
+        try:
+            projects = await plane_api.get_all_projects()
+            if not projects:
+                return
+
+            import aiohttp
+            now = datetime.now(timezone.utc)
+            stale_threshold = now - timedelta(days=7)
+            report_parts = []
+            total_open = 0
+            total_stale = 0
+
+            for proj in projects:
+                pid = proj['id']
+                pname = proj.get('identifier') or proj.get('name', '?')
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        tasks = await plane_api._tasks_manager._get_project_issues(
+                            session, pid, assigned_only=False
+                        )
+                except Exception:
+                    continue
+
+                if not tasks:
+                    continue
+
+                total_open += len(tasks)
+                stale = []
+                no_assignee = []
+                for t in tasks:
+                    if t.updated_at:
+                        try:
+                            updated = datetime.fromisoformat(t.updated_at.replace('Z', '+00:00'))
+                            if updated < stale_threshold:
+                                stale.append(t)
+                        except (ValueError, TypeError):
+                            pass
+                    if not t.assignee_names:
+                        no_assignee.append(t)
+
+                total_stale += len(stale)
+
+                part = f"📂 {pname}: {len(tasks)} открытых"
+                if stale:
+                    part += f", ⚠️ {len(stale)} застряли"
+                if no_assignee:
+                    part += f", ❓ {len(no_assignee)} без исполнителя"
+                report_parts.append(part)
+
+            if not report_parts:
+                return
+
+            summary_text = (
+                f"📊 <b>Ежедневный отчёт Plane</b>\n"
+                f"📋 Всего открытых: {total_open}\n"
+                f"⚠️ Без движения &gt;7 дней: {total_stale}\n\n"
+                + "\n".join(report_parts)
+            )
+
+            # AI analysis
+            if ai_manager.providers_count > 0 and total_open > 0:
+                try:
+                    ai_response = await ai_manager.chat(
+                        user_message=(
+                            f"Ежедневный отчёт:\n{summary_text}\n\n"
+                            f"Кратко (2-3 предложения): что требует внимания?"
+                        ),
+                        system_prompt="Ты помощник руководителя IT. Анализируй кратко."
+                    )
+                    if ai_response and ai_response.content:
+                        summary_text += f"\n\n🤖 <b>AI:</b> {ai_response.content}"
+                except Exception as e:
+                    bot_logger.warning(f"Scheduled AI analysis failed: {e}")
+
+            # Send to admin chat
+            from aiogram import Bot
+            from ..config import settings as cfg
+            bot = Bot(token=cfg.telegram_token)
+            try:
+                kwargs = {"chat_id": chat_id, "text": summary_text, "parse_mode": "HTML"}
+                if topic_id:
+                    kwargs["message_thread_id"] = topic_id
+                await bot.send_message(**kwargs)
+                bot_logger.info("Scheduled Plane analysis sent")
+            finally:
+                await bot.session.close()
+
+        except Exception as e:
+            bot_logger.error(f"Error in scheduled plane analysis: {e}")
 
     def is_running(self) -> bool:
         """Проверить, запущен ли планировщик"""

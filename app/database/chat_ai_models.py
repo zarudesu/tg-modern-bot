@@ -145,6 +145,9 @@ class DetectedIssue(Base):
     plane_issue_id = Column(String(100), nullable=True)
     plane_project_id = Column(String(100), nullable=True)
 
+    # Deduplication
+    content_hash = Column(String(16), nullable=True, index=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

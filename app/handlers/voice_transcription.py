@@ -24,12 +24,27 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from ..config import settings
 from ..utils.logger import bot_logger
 from ..services.n8n_ai_service import n8n_ai_service
+from ..services.redis_service import redis_service
 
 
 router = Router(name="voice_transcription")
 
-# Store transcriptions temporarily for task creation
-_transcription_cache: dict = {}  # message_id -> transcription
+# TTL по типу ключа (секунды)
+CACHE_TTL_AI_TASK = 900       # 15 min
+CACHE_TTL_VOICE_SELECT = 900  # 15 min
+CACHE_TTL_VOICE_REPORT = 1800 # 30 min
+CACHE_TTL_DEFAULT = 900       # 15 min
+
+
+def _ttl_for_key(key: str) -> int:
+    """Return TTL based on cache key prefix."""
+    if key.startswith("ai_task:"):
+        return CACHE_TTL_AI_TASK
+    if key.startswith("voice_task_select:"):
+        return CACHE_TTL_VOICE_SELECT
+    if key.startswith("voice_report:"):
+        return CACHE_TTL_VOICE_REPORT
+    return CACHE_TTL_DEFAULT
 
 
 async def download_voice_file(bot: Bot, file_id: str) -> Optional[str]:
@@ -495,13 +510,13 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
             # Сохраняем для дальнейшей обработки
             cache_key = f"voice_report:{message.from_user.id}:{message.message_id}"
-            _transcription_cache[cache_key] = {
+            await redis_service.set_json(cache_key, {
                 "transcription": transcription,
                 "entries": entries,
                 "status_message_id": status_msg.message_id,
                 "chat_id": message.chat.id,
                 "duration": message.voice.duration
-            }
+            }, ttl=_ttl_for_key(cache_key))
 
             # Формируем красивый результат для всех записей
             entries_text = ""
@@ -549,12 +564,12 @@ async def handle_ai_voice_report(message: Message, bot: Bot):
 
             # Сохраняем транскрипцию
             cache_key = f"{message.chat.id}:{message.message_id}"
-            _transcription_cache[cache_key] = {
+            await redis_service.set_json(cache_key, {
                 "text": transcription,
                 "user_id": message.from_user.id,
                 "chat_id": message.chat.id,
                 "duration": message.voice.duration
-            }
+            }, ttl=_ttl_for_key(cache_key))
 
             await status_msg.edit_text(
                 f"<b>🎤 Транскрипция</b> ({message.voice.duration}сек):\n\n"
@@ -594,12 +609,12 @@ async def handle_local_transcription(message: Message, bot: Bot, status_msg: Mes
 
         # 3. Cache transcription for later use
         cache_key = f"{message.chat.id}:{message.message_id}"
-        _transcription_cache[cache_key] = {
+        await redis_service.set_json(cache_key, {
             "text": transcription,
             "user_id": message.from_user.id,
             "chat_id": message.chat.id,
             "duration": message.voice.duration
-        }
+        }, ttl=_ttl_for_key(cache_key))
 
         # 4. Show transcription with action buttons
         duration_str = f"{message.voice.duration}сек"
@@ -632,7 +647,7 @@ async def callback_voice_to_task(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"{chat_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Транскрипция истекла", show_alert=True)
@@ -681,7 +696,7 @@ async def callback_voice_to_journal(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"{chat_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Транскрипция истекла", show_alert=True)
@@ -712,7 +727,7 @@ async def callback_voice_to_email(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"{chat_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Транскрипция истекла", show_alert=True)
@@ -747,7 +762,7 @@ async def callback_voice_ai_to_journal(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"voice_report:{admin_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Данные истекли", show_alert=True)
@@ -804,7 +819,7 @@ async def callback_voice_ai_to_report(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"voice_report:{admin_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Данные истекли", show_alert=True)
@@ -837,7 +852,7 @@ async def callback_voice_find_task(callback: CallbackQuery):
         message_id = int(parts[2])
 
         cache_key = f"voice_report:{admin_id}:{message_id}"
-        cached = _transcription_cache.get(cache_key)
+        cached = await redis_service.get_json(cache_key)
 
         if not cached:
             await callback.answer("❌ Данные истекли", show_alert=True)
@@ -863,11 +878,11 @@ async def callback_voice_find_task(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
 
 
-def get_transcription_from_cache(cache_key: str) -> Optional[dict]:
+async def get_transcription_from_cache(cache_key: str) -> Optional[dict]:
     """Get cached transcription data (for webhook handlers)"""
-    return _transcription_cache.get(cache_key)
+    return await redis_service.get_json(cache_key)
 
 
-def update_transcription_cache(cache_key: str, data: dict):
+async def update_transcription_cache(cache_key: str, data: dict):
     """Update cached transcription data (for webhook handlers)"""
-    _transcription_cache[cache_key] = data
+    await redis_service.set_json(cache_key, data, ttl=_ttl_for_key(cache_key))

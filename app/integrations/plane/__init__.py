@@ -326,6 +326,38 @@ class PlaneAPI:
             bot_logger.error(f"Error creating comment: {e}")
             return None
 
+    async def search_issues(
+        self,
+        project_id: str,
+        search_text: str,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Search open issues by text match.
+
+        Args:
+            project_id: Plane project UUID
+            search_text: Text to search for
+            limit: Max results
+
+        Returns:
+            List of matching issue dicts
+        """
+        if not self.configured:
+            return []
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.search_open_issues(
+                    session=session,
+                    project_id=project_id,
+                    search_text=search_text,
+                    limit=limit
+                )
+        except Exception as e:
+            bot_logger.error(f"Error searching issues: {e}")
+            return []
+
 
 # Create global instance using settings
 from ...config import settings

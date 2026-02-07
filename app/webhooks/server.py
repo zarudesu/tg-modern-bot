@@ -665,37 +665,111 @@ class WebhookServer:
             task_data = detection.get('task_data', {})
 
             # ==== Авто-создание (высокая уверенность >= 75%) ====
-            if action == 'auto_created':
-                # n8n уже создал задачу - отправляем уведомление
-                created_issue_id = data.get('created_issue', {}).get('id')
-                created_seq_id = data.get('created_issue', {}).get('sequence_id')
-
-                # Уведомляем в чат где было сообщение
+            # Бот сам создаёт задачу с dedup check (не n8n)
+            if action in ('auto_created', 'auto_create'):
                 chat_id = original.get('chat_id')
                 message_id = original.get('message_id')
+                project_id = plane.get('project_id')
 
-                if chat_id:
+                if not chat_id or not project_id:
+                    return web.json_response({'error': 'Missing chat_id or project_id'}, status=400)
+
+                # Content hash dedup — skip exact duplicates in last 24h
+                import hashlib
+                normalized = (task_data.get('title', '') + original.get('text', '')).lower().strip()
+                content_hash = hashlib.md5(normalized.encode()).hexdigest()[:16]
+
+                dup_key = f"dedup:{chat_id}:{content_hash}"
+                from ..services.redis_service import redis_service
+                if await redis_service.exists(dup_key):
+                    bot_logger.info(f"Duplicate detected (hash={content_hash}), skipping")
+                    return web.json_response({'status': 'ignored', 'reason': 'duplicate'})
+                await redis_service.set_json(dup_key, True, ttl=86400)  # 24h
+
+                # Search for similar open issues
+                from ..integrations.plane import plane_api
+                similar = await plane_api.search_issues(project_id, task_data.get('title', ''), limit=3)
+
+                if similar:
+                    # Similar found — show buttons instead of auto-creating
+                    cache_key = f"ai_task:{chat_id}:{message_id}"
+                    await redis_service.set_json(cache_key, {
+                        'task_data': task_data,
+                        'plane': plane,
+                        'original': original,
+                        'confidence': confidence
+                    }, ttl=900)
+
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    buttons = []
+                    for s in similar:
+                        label = f"📎 #{s['sequence_id']} {s['name'][:35]}"
+                        buttons.append([InlineKeyboardButton(
+                            text=label,
+                            callback_data=f"ai_add_comment:{chat_id}:{message_id}:{s['id'][:36]}"
+                        )])
+                    buttons.append([InlineKeyboardButton(
+                        text="➕ Создать новую",
+                        callback_data=f"ai_force_create:{chat_id}:{message_id}"
+                    )])
+
                     try:
+                        await self.bot.send_message(
+                            chat_id=chat_id,
+                            text=(
+                                f"🔍 <b>AI обнаружил задачу (уверенность: {confidence}%)</b>\n\n"
+                                f"📝 <b>{task_data.get('title', 'Без названия')}</b>\n\n"
+                                f"<b>Похожие задачи:</b>\n"
+                                + "\n".join(f"• #{s['sequence_id']} {s['name']}" for s in similar)
+                                + "\n\n<i>Добавить коммент или создать новую?</i>"
+                            ),
+                            reply_to_message_id=message_id,
+                            parse_mode="HTML",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                        )
+                    except Exception as e:
+                        bot_logger.warning(f"Failed to send dedup notification: {e}")
+
+                    return web.json_response({'status': 'processed', 'action': 'dedup_check'})
+
+                # No duplicates — auto-create
+                try:
+                    description = (
+                        f"<p><strong>Автоматически создано из сообщения в чате</strong></p>"
+                        f"<p>{task_data.get('description', '')}</p>"
+                        f"<hr/>"
+                        f"<p><em>Автор: {original.get('user_name', 'Unknown')}</em></p>"
+                    )
+                    issue = await plane_api.create_issue(
+                        project_id=project_id,
+                        name=task_data.get('title', 'Задача из чата'),
+                        description=description,
+                        priority=task_data.get('priority', 'medium')
+                    )
+
+                    if issue and chat_id:
+                        seq_id = issue.get('sequence_id', '?')
                         await self.bot.send_message(
                             chat_id=chat_id,
                             text=(
                                 f"✅ <b>Задача автоматически создана</b>\n\n"
                                 f"📝 <b>{task_data.get('title', 'Без названия')}</b>\n"
                                 f"📊 Проект: {plane.get('project_name', 'N/A')}\n"
-                                f"🔢 Номер: #{created_seq_id}\n\n"
+                                f"🔢 Номер: #{seq_id}\n\n"
                                 f"<i>AI уверенность: {confidence}%</i>"
                             ),
                             reply_to_message_id=message_id,
                             parse_mode="HTML"
                         )
-                    except Exception as e:
-                        bot_logger.warning(f"Failed to send auto-create notification: {e}")
 
-                return web.json_response({
-                    'status': 'processed',
-                    'action': 'auto_created',
-                    'issue_id': created_issue_id
-                })
+                    return web.json_response({
+                        'status': 'processed',
+                        'action': 'auto_created',
+                        'issue_id': issue.get('id') if issue else None
+                    })
+                except Exception as e:
+                    bot_logger.error(f"Auto-create failed: {e}")
+                    return web.json_response({'error': str(e)}, status=500)
 
             # ==== Требуется подтверждение (средняя уверенность 50-74%) ====
             elif action == 'pending_confirmation':
@@ -714,14 +788,14 @@ class WebhookServer:
                 # Используем кэш для больших данных
                 cache_key = f"ai_task:{chat_id}:{message_id}"
 
-                # Сохраняем в memory cache (можно заменить на Redis)
-                from ..handlers.voice_transcription import _transcription_cache
-                _transcription_cache[cache_key] = {
+                # Сохраняем в Redis cache
+                from ..services.redis_service import redis_service
+                await redis_service.set_json(cache_key, {
                     'task_data': task_data,
                     'plane': plane,
                     'original': original,
                     'confidence': confidence
-                }
+                }, ttl=900)
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
@@ -873,11 +947,11 @@ class WebhookServer:
 
                 # Сохраняем данные для выбора задачи
                 cache_key = f"voice_task_select:{admin_telegram_id}:{original_message_id}"
-                from ..handlers.voice_transcription import _transcription_cache
-                _transcription_cache[cache_key] = {
+                from ..services.redis_service import redis_service as _rs
+                await _rs.set_json(cache_key, {
                     'transcription': transcription,
                     'extraction': extraction
-                }
+                }, ttl=900)
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
@@ -928,12 +1002,12 @@ class WebhookServer:
 
                 # Сохраняем данные
                 cache_key = f"voice_task_select:{admin_telegram_id}:{original_message_id}"
-                from ..handlers.voice_transcription import _transcription_cache
-                _transcription_cache[cache_key] = {
+                from ..services.redis_service import redis_service as _rs2
+                await _rs2.set_json(cache_key, {
                     'transcription': transcription,
                     'extraction': extraction,
                     'candidates': candidates
-                }
+                }, ttl=900)
 
                 # Создаём кнопки для каждой задачи-кандидата
                 buttons = []
