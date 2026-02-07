@@ -21,6 +21,9 @@ def create_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Создание основной клавиатуры с частыми функциями"""
     keyboard = [
         [
+            InlineKeyboardButton(text="🤖 Plane AI ассистент", callback_data="start_plane_ai")
+        ],
+        [
             InlineKeyboardButton(text="📋 Создать запись", callback_data="start_journal"),
             InlineKeyboardButton(text="📊 История работ", callback_data="show_history")
         ],
@@ -105,17 +108,17 @@ async def start_command(message: Message, **kwargs):
         
         # Улучшенное приветствие для администратора
         username = escape_markdown(user.first_name or "Администратор")
-        
-        welcome_text = f"👋 Добро пожаловать, *{username}*\\!\n\n"
-        
+
+        welcome_text = f"👋 *{username}*, добро пожаловать\\!\n\n"
+
         welcome_text += (
-            "🤖 Я *HHIVP IT Assistant Bot* \\- ваш помощник по управлению IT\\-работами\\.\n\n"
-            "🚀 *Основные возможности:*\n"
-            "• 📋 Ведение журнала выполненных работ\n"
-            "• 📊 Просмотр истории и статистики\n"
-            "• 🏢 Управление компаниями и исполнителями\n"
-            "• 📈 Генерация отчетов\n\n"
-            "💡 *Выберите действие из меню ниже или используйте команды\\.*"
+            "🤖 *Plane AI* \\— спроси что угодно о задачах\n"
+            "  `/plane чем заняться?`\n\n"
+            "☀️ *Утренний дайджест* \\— каждый день в 09:00\n"
+            "📋 *Журнал работ* \\+ отчёты \\+ Google Sheets\n"
+            "📝 *Заявки* из групповых чатов → Plane\n"
+            "🔧 *Диагностика:* `/diag`\n\n"
+            "👇 *Выберите действие:*"
         )
         
         await message.answer(
@@ -207,8 +210,9 @@ async def callback_main_menu(callback_query: CallbackQuery):
 
         welcome_text = (
             "🏠 *Главное меню*\n\n"
-            "Добро пожаловать в HHIVP IT Assistant Bot\\!\n\n"
-            "Выберите действие из меню ниже:"
+            "🤖 `/plane` \\— AI\\-ассистент по задачам\n"
+            "✈️ Задачи \\| 📋 Журнал \\| 📊 Отчёты\n\n"
+            "👇 *Выберите действие:*"
         )
 
         await callback_query.message.edit_text(
@@ -291,12 +295,13 @@ async def ping_command(message: Message):
         await message.answer("❌ Ошибка при выполнении ping\\.", parse_mode="MarkdownV2")
 
 
-# Команды для меню бота (упрощенное)
 COMMANDS_MENU = [
-    BotCommand(command="start", description="🏠 Главное меню"),
-    BotCommand(command="help", description="❓ Справка"),
-    BotCommand(command="daily_tasks", description="✈️ Мои задачи"),
-    BotCommand(command="request", description="📝 Создать заявку (в группе)"),
+    BotCommand(command="start", description="Главное меню"),
+    BotCommand(command="plane", description="AI-ассистент по задачам"),
+    BotCommand(command="daily_tasks", description="Мои задачи из Plane"),
+    BotCommand(command="help", description="Справка по всем функциям"),
+    BotCommand(command="diag", description="Диагностика системы"),
+    BotCommand(command="request", description="Создать заявку (в группе)"),
 ]
 
 
@@ -490,6 +495,52 @@ async def callback_show_help(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data == "start_plane_ai")
+async def callback_start_plane_ai(callback: CallbackQuery):
+    """Обработчик кнопки 'Plane AI ассистент' — вход в /plane режим"""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+    if not settings.is_admin(user_id):
+        await callback.message.answer("Admin only", parse_mode=None)
+        return
+
+    try:
+        from ..modules.plane_assistant.states import PlaneAssistantStates
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+
+        # Получаем FSM контекст
+        storage = callback.bot.fsm.storage if hasattr(callback.bot, 'fsm') else None
+        if storage:
+            state_key = StorageKey(
+                bot_id=callback.bot.id,
+                chat_id=callback.message.chat.id,
+                user_id=user_id
+            )
+            state = FSMContext(storage=storage, key=state_key)
+            await state.set_state(PlaneAssistantStates.conversation)
+
+        help_text = (
+            "<b>Plane AI Assistant</b>\n\n"
+            "Напиши что угодно о задачах:\n"
+            "- <i>чем мне заняться?</i>\n"
+            "- <i>какие срочные задачи?</i>\n"
+            "- <i>где я проебался?</i>\n"
+            "- <i>что по харцу?</i>\n"
+            "- <i>закрой #123</i>\n"
+            "- <i>создай задачу в HARZL: настроить VPN</i>\n"
+            "- <i>назначь #456 на Тимофея</i>\n\n"
+            "Голосовые тоже работают.\n"
+            "Выход: /plane_exit"
+        )
+        await callback.message.answer(help_text, parse_mode="HTML")
+
+    except Exception as e:
+        bot_logger.error(f"Plane AI callback error: {e}")
+        await callback.message.answer("Ошибка при запуске Plane AI", parse_mode=None)
+
+
 @router.callback_query(F.data == "show_profile")
 async def callback_show_profile(callback: CallbackQuery):
     """Обработчик кнопки 'Профиль'"""
@@ -575,11 +626,12 @@ async def callback_show_main_menu(callback: CallbackQuery):
                 return
             
             username = escape_markdown(user.first_name or "Администратор")
-            
-            welcome_text = f"👋 *{username}*\\!\n\n"
-            welcome_text += (
-                "🤖 Я *HHIVP IT Assistant Bot* \\- ваш помощник по управлению IT\\-работами\\.\n\n"
-                "💡 *Выберите действие из меню ниже или используйте команды\\.*"
+
+            welcome_text = (
+                f"🏠 *{username}*, главное меню\n\n"
+                "🤖 `/plane` \\— AI\\-ассистент по задачам\n"
+                "✈️ Задачи \\| 📋 Журнал \\| 📊 Отчёты\n\n"
+                "👇 *Выберите действие:*"
             )
             
             await callback.message.edit_text(
