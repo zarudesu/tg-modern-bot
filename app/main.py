@@ -153,6 +153,7 @@ async def on_startup(bot: Bot):
             bot_logger.info("Daily tasks scheduler disabled due to error")
         
         # Morning digest loop (AI-powered daily summary at 09:00 MSK)
+        from .integrations.plane import plane_api
         if ai_initialized and plane_api.configured:
             from .modules.plane_assistant.daily_digest import digest_loop
             asyncio.create_task(digest_loop(bot))
