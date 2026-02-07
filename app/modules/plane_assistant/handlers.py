@@ -25,25 +25,32 @@ from .states import PlaneAssistantStates
 
 router = Router(name="plane_assistant")
 
-# User email for Plane API queries
-USER_EMAIL = "zarudesu@gmail.com"
+# Telegram user_id → Plane email mapping
+# Add more users as needed
+USER_EMAIL_MAP = {
+    5765249027: "zarudesu@gmail.com",  # Константин
+}
+DEFAULT_EMAIL = "zarudesu@gmail.com"
 
-SYSTEM_PROMPT = """Ты — AI-ассистент для управления задачами в Plane.so. Твоя задача — помочь IT-специалисту с СДВГ разобраться в его задачах.
+
+def _get_plane_email(user_id: int) -> str:
+    return USER_EMAIL_MAP.get(user_id, DEFAULT_EMAIL)
+
+
+SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so. Помоги IT-специалисту с СДВГ.
 
 ПРАВИЛА:
-1. Отвечай КРАТКО и по делу. Не нужны длинные тексты — они парализуют человека с СДВГ.
-2. Выделяй ГЛАВНОЕ. Если 241 задача — не перечисляй все, а скажи "у тебя 4 срочных, 15 просроченных, начни с X".
-3. Будь человечным и поддерживающим, не формальным.
-4. Используй HTML-разметку (<b>, <i>, <code>) для Telegram.
-5. Если нужно выполнить действие (закрыть/назначить/коммент), верни JSON-блок:
-   ```json
+1. КРАТКО и по делу. Длинные тексты парализуют — максимум 5-7 строк.
+2. Выделяй ГЛАВНОЕ: "у тебя X срочных, Y просроченных, начни с Z".
+3. Будь человечным, не формальным.
+4. ОБЯЗАТЕЛЬНО используй <b>жирный</b> для важного, <i>курсив</i> для пояснений.
+5. Если нужно действие — СНАЧАЛА напиши что сделаешь, ПОТОМ JSON:
    {"action": "close_issue", "seq_id": 123, "comment": "optional"}
    {"action": "assign_issue", "seq_id": 123, "assignee": "Тимофей"}
    {"action": "comment_issue", "seq_id": 123, "comment": "текст"}
-   ```
-6. НЕ придумывай задачи — работай только с реальными данными.
-7. Если пользователь спрашивает "чем заняться" — выбери TOP-3 задачи по приоритету и объясни ПОЧЕМУ начать с них.
-8. Если видишь дубликаты или задачи старше полугода — упомяни это.
+6. Работай ТОЛЬКО с реальными данными ниже.
+7. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
+8. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
 
 КОНТЕКСТ WORKSPACE:
 {workspace_context}
@@ -89,7 +96,7 @@ def _extract_action(ai_text: str) -> tuple:
     return ai_text, None
 
 
-async def _gather_plane_data(user_message: str) -> str:
+async def _gather_plane_data(user_message: str, user_email: str) -> str:
     """Intelligently gather Plane data based on the user's question."""
     msg_lower = user_message.lower()
     data_parts = []
@@ -102,7 +109,6 @@ async def _gather_plane_data(user_message: str) -> str:
         if result:
             _, _, issue = result
             data_parts.append(f"Задача #{seq_id}: {json.dumps(issue, ensure_ascii=False)}")
-            # Also get comments
             try:
                 comments = await plane_api.get_issue_comments(result[0], issue['id'])
                 if comments:
@@ -112,27 +118,26 @@ async def _gather_plane_data(user_message: str) -> str:
                 pass
 
     # Keywords for different data
-    keywords_my_tasks = ['мои', 'мне', 'заняться', 'задач', 'дела', 'todo', 'сделать']
-    keywords_overdue = ['просроч', 'проебал', 'забыл', 'пропустил', 'overdue', 'stale', 'завис']
+    keywords_my_tasks = ['мои', 'мне', 'заняться', 'задач', 'дела', 'todo', 'сделать', 'срочн']
+    keywords_overdue = ['просроч', 'проебал', 'забыл', 'пропустил', 'overdue', 'stale', 'завис', 'горит']
     keywords_project = ['проект', 'project']
-    keywords_workload = ['нагрузк', 'workload', 'команд', 'кто']
+    keywords_workload = ['нагрузк', 'workload', 'команд', 'кто чем']
     keywords_status = ['статус', 'status', 'обзор', 'сводк', 'итог']
 
     if any(kw in msg_lower for kw in keywords_my_tasks) or not data_parts:
-        data_parts.append(await plane_service.get_my_tasks_summary(USER_EMAIL))
+        data_parts.append(await plane_service.get_my_tasks_summary(user_email))
 
     if any(kw in msg_lower for kw in keywords_overdue):
-        data_parts.append(await plane_service.get_overdue_summary(USER_EMAIL))
+        data_parts.append(await plane_service.get_overdue_summary(user_email))
 
     if any(kw in msg_lower for kw in keywords_workload):
         data_parts.append(await plane_service.get_workload_summary())
 
     # Check for specific project mentions
     if any(kw in msg_lower for kw in keywords_project):
-        # Try to extract project name
         words = user_message.upper().split()
         for word in words:
-            if len(word) >= 2 and word not in ('ПО', 'НА', 'ЧТО', 'КАК', 'ПРОЕКТ', 'PROJECT'):
+            if len(word) >= 2 and word not in ('ПО', 'НА', 'ЧТО', 'КАК', 'ПРОЕКТ', 'PROJECT', 'ПРОЕКТУ'):
                 result = await plane_service.get_project_tasks_summary(word)
                 if 'не найден' not in result:
                     data_parts.append(result)
@@ -141,19 +146,20 @@ async def _gather_plane_data(user_message: str) -> str:
     if any(kw in msg_lower for kw in keywords_status):
         data_parts.append(await plane_service.get_projects_list())
         if not any(kw in msg_lower for kw in keywords_my_tasks):
-            data_parts.append(await plane_service.get_my_tasks_summary(USER_EMAIL))
+            data_parts.append(await plane_service.get_my_tasks_summary(user_email))
 
-    # If nothing matched (free-form question), provide general context
     if not data_parts:
-        data_parts.append(await plane_service.get_my_tasks_summary(USER_EMAIL))
+        data_parts.append(await plane_service.get_my_tasks_summary(user_email))
 
     return "\n\n".join(data_parts)
 
 
 async def _process_message(user_message: str, user_id: int, state: FSMContext) -> str:
     """Process a user message through AI and return HTML response."""
+    user_email = _get_plane_email(user_id)
+
     # Gather data from Plane
-    plane_data = await _gather_plane_data(user_message)
+    plane_data = await _gather_plane_data(user_message, user_email)
 
     # Get conversation history
     conv_history = await context_manager.get_last_context_summary(user_id)
@@ -166,7 +172,7 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext) -
     system = SYSTEM_PROMPT.format(
         workspace_context=workspace_ctx,
         conversation_history=conv_history or "(новый разговор)",
-        plane_data=plane_data[:6000],  # Limit to avoid token overflow
+        plane_data=plane_data[:6000],
     )
 
     # Call AI
@@ -178,7 +184,6 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext) -
         ai_text = response.content if hasattr(response, 'content') else str(response)
     except Exception as e:
         bot_logger.error(f"AI error in /plane: {e}")
-        # Fallback: return raw plane data
         safe = _escape_html(plane_data[:3000])
         return f"<i>AI недоступен, вот сырые данные:</i>\n\n<code>{safe}</code>"
 
@@ -190,7 +195,17 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext) -
     text, action = _extract_action(ai_text)
 
     if action:
-        # Store pending action for confirmation
+        # Ensure there's always visible text before confirmation buttons
+        if not text:
+            seq = action.get("seq_id", "?")
+            action_name = action.get("action", "")
+            fallback_labels = {
+                "close_issue": f"Закрываю задачу <b>#{seq}</b>",
+                "assign_issue": f"Назначаю <b>#{seq}</b> на {action.get('assignee', '?')}",
+                "comment_issue": f"Добавляю комментарий к <b>#{seq}</b>",
+            }
+            text = fallback_labels.get(action_name, f"Выполняю действие с #{seq}")
+
         await state.update_data(pending_action=action)
         await state.set_state(PlaneAssistantStates.confirm_write)
         return text, action  # Tuple signals caller to show confirmation
