@@ -182,13 +182,87 @@ Create Work Journal entries
 
 ---
 
-## Enterprise Architecture (v3.0) - BETA
+## AI Task Detection v2 (PRODUCTION READY)
 
-**Status:** In development, not production ready
+**Purpose:** Smart task creation from group messages with dedup, assignee selection, and training data.
+
+**Flow:**
+```
+Message in group → Chat Monitor → AI detects task (confidence > 75%) →
+Suggestion with "Create Task" button → Dedup check (similar issues) →
+Task preview (title, priority, assignee, project) → Create in Plane
+```
+
+**Key Features:**
+- Dedup detection — searches similar open issues before creating
+- Assignee picker — inline buttons with workspace members (Redis cached)
+- Task preview — edit before creation
+- Reply in source chat — notify when task created
+- Training data recording — feedback (accept/reject/correct) for AI improvement
+
+**Handlers:**
+- `app/handlers/ai_callbacks.py` — Callback flow: confirm → dedup → preview → assignee → create
+- `app/modules/ai_assistant/task_suggestion_handler.py` — Event-driven suggestion sender
+
+**Admin Commands:**
+```
+/plane_audit          Deep audit: overdue, stale, unassigned, workload
+/plane_status         AI-powered status analysis by state
+/ai_export [days]     Export training data (DetectedIssue records)
+/ai_quality [days]    AI detection quality metrics (precision, confidence, per-model)
+```
+
+---
+
+## System Diagnostics (PRODUCTION READY)
+
+**Purpose:** Live health checks for all bot subsystems.
+
+**Command:** `/diag` (admin-only)
+
+**Checks:**
+| Check | What | Source |
+|-------|------|--------|
+| Database | `SELECT 1`, user count | AsyncSessionLocal |
+| Redis | `ping()`, `dbsize()`, cache | redis_service |
+| Plane API | `test_connection()`, projects | plane_api |
+| Webhook | `GET /health` | aiohttp internal |
+| AI Provider | providers_count, default | ai_manager |
+| Migrations | `alembic_version` table | SQL query |
+
+Each check with `asyncio.wait_for(timeout=10)`.
+
+**File:** `app/handlers/diagnostics.py`
+
+---
+
+## AI Quality Analytics (PRODUCTION READY)
+
+**Purpose:** Analyze AI task detection quality from recorded feedback.
+
+**Command:** `/ai_quality [days]` (admin-only, default: 30 days)
+
+**Metrics:**
+- **Precision**: accepted / (accepted + rejected)
+- **Detection rate**: total / days
+- **Feedback distribution**: accepted, rejected, corrected, no_feedback
+- **Confidence buckets**: [0-0.3, 0.3-0.5, 0.5-0.7, 0.7-0.9, 0.9-1.0] — accept rate per bucket
+- **Correction distance**: mean edit distance for corrected issues
+- **Per-model stats**: precision by ai_model_used
+
+**Data source:** `DetectedIssue` table (fields: user_feedback, confidence, correction_distance, ai_model_used)
+
+**File:** `app/handlers/ai_quality.py`
+
+---
+
+## Enterprise Architecture (v3.0) - PRODUCTION
+
+**Status:** Production ready, event bus used for AI task detection
 
 **Event Bus** (`app/core/events/`): Reactive event-driven, priority-based, 7+ event types
 **Plugin System** (`app/core/plugins/`): Dynamic plugin loading/unloading
-**AI Abstractions** (`app/core/ai/`): Universal LLM provider interface (OpenAI + Anthropic)
+**AI Abstractions** (`app/core/ai/`): Universal LLM provider interface (OpenRouter default)
 
-**AI Assistant** (`app/modules/ai_assistant/`): `/ai`, `/ai_summary`, `/ai_auto_task`
+**AI Assistant** (`app/modules/ai_assistant/`): `/ai`, `/ai_summary`, smart task detection
 **Chat Monitor** (`app/modules/chat_monitor/`): All group messages, context (50 msgs/chat)

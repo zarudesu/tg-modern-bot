@@ -13,26 +13,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cat docs/ROADMAP.md | grep -A2 "Status:"
 git log --oneline -5
-python3 test_modules_isolation.py && python3 test_basic.py
+make test   # 75 unit tests, must pass
 ```
 
-### Current Priority (2026-01-20)
+### Current Priority (2026-02-07)
 
-**Phase 1: Critical Fixes (IN PROGRESS)**
-- [ ] Event Bus memory leak (`app/core/events/event_bus.py:135`)
-- [ ] Webhook error exposure (`app/webhooks/server.py:355`)
-- [ ] Webhook signature required (`app/webhooks/server.py:65`)
-- [ ] Google Sheets blocking I/O (`app/integrations/google_sheets.py:49`)
-- [ ] aiohttp session reuse (`app/services/n8n_integration_service.py:104`)
+**Phases 1-5: COMPLETED**
+- [x] Phase 1: Critical Fixes (2026-01-20)
+- [x] Phase 2: Architecture Improvements (2026-01-23)
+- [x] Phase 3: New Features — Voice, AI Reports, Smart Task Detection (2026-01-23)
+- [x] Phase 4: AI Task Detection v2 — assignee picker, dedup, audit, training data (2026-02-06)
+- [x] Phase 5: Testing Framework — pytest (95 tests), /diag, /ai_quality commands (2026-02-07)
 
 **Full details:** [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ### After Completing Work
 ```bash
-python3 test_modules_isolation.py && python3 test_basic.py
-# Update ROADMAP.md status, then:
+make test   # Must pass before commit
 git add -A && git commit -m "fix(scope): description"
-./deploy.sh full  # if deploying
+./deploy.sh full  # runs tests → push → pull → build → rebuild
 ```
 
 ### Commit Convention
@@ -61,13 +60,16 @@ make bot-logs                     # View bot logs
 make bot-status                   # Check status
 make db-shell                     # PostgreSQL console
 
-# Testing
-python3 test_modules_isolation.py # Module isolation (CRITICAL!)
-python3 test_basic.py             # Basic functionality
+# Testing (pytest — 95 tests total)
+make test              # Unit tests only (75 tests, fast)
+make test-all          # All + coverage report
+make test-integration  # Integration tests (20 tests)
 
 # Production
-./deploy.sh full                  # push + pull + build + rebuild + logs
+./deploy.sh full                  # test + push + pull + build + rebuild + logs
 ./deploy.sh quick                 # push + pull + restart + logs
+./deploy.sh test                  # Run pytest locally (gates deploy)
+./deploy.sh diag                  # Remote health check
 ./deploy.sh logs                  # View production logs
 ```
 
@@ -84,9 +86,15 @@ python3 test_basic.py             # Basic functionality
 | **Voice Transcription** | PRODUCTION | `app/handlers/voice_transcription.py` | [`modules-reference`](docs/claude/modules-reference.md) |
 | **Daily Tasks** | PRODUCTION | `app/modules/daily_tasks/` | Email → Plane.so automation |
 | **Work Journal** | PRODUCTION | `app/modules/work_journal/` | Work entries → Google Sheets |
-| **AI Assistant** | BETA | `app/modules/ai_assistant/` | OpenAI/Anthropic |
+| **AI Assistant** | PRODUCTION | `app/modules/ai_assistant/` | Smart Task Detection v2 |
 | **Chat Monitor** | PRODUCTION | `app/modules/chat_monitor/` | Persistent context + Problems |
 | **Chat AI Analysis** | PRODUCTION | `app/services/` | Summary + Problem detection |
+| **AI Callbacks** | PRODUCTION | `app/handlers/ai_callbacks.py` | Dedup, assignee picker, task creation |
+| **Plane Audit** | PRODUCTION | `app/handlers/plane_audit.py` | `/plane_audit` — deep project analysis |
+| **Plane Analysis** | PRODUCTION | `app/handlers/plane_analysis.py` | `/plane_status` — AI status report |
+| **AI Training Export** | PRODUCTION | `app/handlers/ai_export.py` | `/ai_export` — training data export |
+| **Diagnostics** | PRODUCTION | `app/handlers/diagnostics.py` | `/diag` — system health checks |
+| **AI Quality** | PRODUCTION | `app/handlers/ai_quality.py` | `/ai_quality` — detection metrics |
 
 **Detailed module docs:** [`docs/claude/modules-reference.md`](docs/claude/modules-reference.md)
 
@@ -268,16 +276,26 @@ Plane.so → n8n webhook → n8n workflow → HTTP POST → localhost:8080/webho
 ## Testing
 
 ```bash
-# Critical (run before every commit)
-python3 test_modules_isolation.py
-python3 test_basic.py
+# pytest (recommended — run before every commit/deploy)
+python3 -m pytest tests/unit/ -v --tb=short           # 75 unit tests
+python3 -m pytest tests/integration/ -v --tb=short     # 20 integration tests
+python3 -m pytest tests/ -v --cov=app --cov-report=term-missing  # all + coverage
 
-# Integration
-python3 test_daily_tasks_comprehensive.py
-python3 test_plane_daily_tasks.py
-python3 test_task_reports_flow.py
-python3 test_email_fix.py
+# Makefile shortcuts
+make test              # Unit tests only (fast)
+make test-all          # All tests + coverage
+make test-integration  # Integration tests only
+make test-coverage     # HTML coverage report
+
+# deploy.sh integration
+./deploy.sh test       # Run pytest locally (gates deployment)
+./deploy.sh full       # Tests → push → pull → build → rebuild
+./deploy.sh diag       # Remote health check (curl + container status)
 ```
+
+**Test infrastructure:** `pyproject.toml` (config), `tests/conftest.py` (fixtures, mocks), `requirements-dev.txt` (dev deps)
+
+**Legacy tests:** 32 old ad-hoc scripts moved to `tests/legacy/` — not included in pytest runs
 
 ---
 
@@ -300,7 +318,8 @@ python3 test_email_fix.py
 ### Documentation Index
 | File | Purpose |
 |------|---------|
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Technical debt & roadmap |
+| [`TESTING_CHECKLIST.md`](TESTING_CHECKLIST.md) | pytest guide, /diag, /ai_quality, troubleshooting |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Technical debt & roadmap (Phases 1-5) |
 | [`docs/claude/modules-reference.md`](docs/claude/modules-reference.md) | Detailed module descriptions |
 | [`docs/claude/development-guide.md`](docs/claude/development-guide.md) | Code examples & patterns |
 | [`docs/guides/task-reports-guide.md`](docs/guides/task-reports-guide.md) | Task Reports module |
@@ -321,4 +340,4 @@ python3 test_email_fix.py
 
 **Last Updated:** 2026-02-07
 **Bot Version:** 3.0
-**Current Phase:** Phase 1 - Critical Fixes
+**Current Phase:** Phase 5 completed — Testing Framework deployed

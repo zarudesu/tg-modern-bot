@@ -19,11 +19,12 @@
 
 ## Current State
 
-### Codebase Metrics (2026-01-20)
-- **Files:** 167 Python files
-- **LOC:** ~22,000 lines
-- **Modules:** 6 production, 2 beta
-- **Test Coverage:** ~40% (needs improvement)
+### Codebase Metrics (2026-02-07)
+- **Files:** 170+ Python files
+- **LOC:** ~23,000 lines
+- **Modules:** 14 production
+- **Tests:** 95 (75 unit + 20 integration, pytest)
+- **Test Coverage:** ~50%
 
 ### Health Score: 6/10
 
@@ -281,8 +282,7 @@ Webhook URL: /webhooks/daily-summary
 
 3. **Check if tests pass:**
    ```bash
-   python3 test_modules_isolation.py
-   python3 test_basic.py
+   make test   # 75 unit tests via pytest
    ```
 
 4. **Review current TODO in this file**
@@ -323,13 +323,12 @@ Examples:
 ### Test Checklist Before Commit
 
 ```bash
-# Required tests
-python3 test_modules_isolation.py  # Module isolation
-python3 test_basic.py              # Basic functionality
+# Required (pytest — 95 tests)
+make test              # Unit tests (fast, ~1.5s)
+make test-all          # All + coverage
 
-# If modified specific modules
-python3 test_email_fix.py          # Daily tasks
-python3 test_task_reports_flow.py  # Task reports
+# Deploy with auto-tests
+./deploy.sh full       # tests → push → pull → build → rebuild
 
 # Format check
 make format
@@ -367,3 +366,20 @@ make typecheck
    - [x] Voice Message Processing - DONE 2026-01-23
    - [x] AI Report Generation - DONE 2026-01-23
    - [x] Smart Task Detection - DONE 2026-01-23
+10. [x] Phase 4: AI Task Detection v2 - COMPLETED 2026-02-06
+    - [x] Dedup check — search similar open issues before creating
+    - [x] Assignee picker — select workspace member from inline buttons
+    - [x] Task preview with edit before creation
+    - [x] Reply in source chat on task creation
+    - [x] `/plane_audit` — deep project audit command
+    - [x] Training data recording (user_feedback, confidence, correction_distance)
+    - [x] `/ai_export` — training data export
+11. [x] Phase 5: Testing Framework - COMPLETED 2026-02-07
+    - [x] pytest infrastructure (pyproject.toml, conftest.py, fixtures)
+    - [x] 75 unit tests (PlaneTask models, duration parser, settings, AI helpers)
+    - [x] 20 integration tests (Plane API, webhook server)
+    - [x] `/diag` command — live system diagnostics (DB, Redis, Plane, Webhook, AI, Migrations)
+    - [x] `/ai_quality` command — AI detection quality metrics
+    - [x] deploy.sh integration (test gate before push, diag command)
+    - [x] Makefile pytest targets
+    - [x] Legacy 32 test scripts moved to tests/legacy/

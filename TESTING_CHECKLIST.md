@@ -1,172 +1,164 @@
-# 🧪 Testing Checklist
+# Testing Guide
 
-Чеклист для тестирования production интеграций локально.
+## Automated Tests (pytest)
 
-## Предварительная настройка
+95 тестов: 75 unit + 20 integration. Запускаются локально перед деплоем.
 
-- [x] База данных запущена (порт 5433)
-- [x] Бот запущен (@zardes_bot)
-- [ ] Credentials из `SECRETS.md` скопированы в `.env`
-- [ ] Бот перезапущен после добавления credentials
+### Quick Start
 
 ```bash
-make dev-restart
-make bot-logs  # Проверить что нет ошибок
+# Установить dev-зависимости (первый раз)
+pip install -r requirements-dev.txt
+
+# Запуск
+make test              # Unit tests (быстро, ~1.5s)
+make test-all          # Все + coverage
+make test-integration  # Integration tests
+make test-coverage     # HTML coverage report → htmlcov/index.html
 ```
 
-## 1. Work Journal → n8n → Google Sheets
+### Что тестируется
 
-### Шаги тестирования:
+#### Unit Tests (`tests/unit/`)
 
-- [ ] Отправить `/work_journal` боту @zardes_bot
-- [ ] Заполнить все поля:
-  - Компания
-  - Исполнитель
-  - Вид работы
-  - Описание
-  - Длительность (минуты)
-  - Дата
-- [ ] Нажать "✅ Создать запись"
-- [ ] Проверить что пришло подтверждение от бота
-- [ ] Открыть Google Sheets и проверить новую строку
+| Файл | Тесты | Что проверяет |
+|------|-------|---------------|
+| `test_plane_models.py` | 20+ | PlaneTask: is_overdue, priority_emoji, state_emoji, task_url |
+| `test_duration_parser.py` | 20+ | parse_duration_to_minutes: "1 час"→60, "2ч 30м"→150 |
+| `test_settings.py` | 15+ | Settings: admin_user_id_list, is_admin, telegram token |
+| `test_ai_helpers.py` | 15+ | _edit_distance_ratio: identical→0.0, different→1.0 |
 
-### Ожидаемый результат:
+#### Integration Tests (`tests/integration/`)
 
-✅ В Google Sheets появилась новая строка с данными из Work Journal
+| Файл | Тесты | Что проверяет |
+|------|-------|---------------|
+| `test_plane_api.py` | 10+ | PlaneAPIClient: GET/POST, auth errors, rate limit retry (aioresponses mock) |
+| `test_webhook_server.py` | 10+ | WebhookServer: health, AI task result, Plane webhook (aiohttp TestClient) |
 
-### Что проверить при ошибке:
+### Инфраструктура
 
-```bash
-make bot-logs  # Поиск ошибок n8n webhook
+- `pyproject.toml` — конфигурация pytest, coverage, markers
+- `tests/conftest.py` — fixtures (mock_bot, plane_task_factory), env overrides, SQLite mock DB
+- `requirements-dev.txt` — pytest, pytest-asyncio, pytest-cov, aioresponses, aiosqlite
 
-# Проверить настройки в .env:
-# N8N_WEBHOOK_URL=https://n8n.hhivp.com/webhook/work-journal
-# N8N_API_KEY=eyJhbGci...
+### Написание новых тестов
+
+```python
+# tests/unit/test_example.py
+import pytest
+from app.integrations.plane.models import PlaneTask
+
+def test_something(plane_task_factory):
+    """plane_task_factory — fixture из conftest.py."""
+    task = plane_task_factory(name="Test", priority="high")
+    assert task.priority_emoji == "🟠"
+
+@pytest.mark.parametrize("input,expected", [
+    ("1 час", 60),
+    ("30 мин", 30),
+])
+def test_parsing(input, expected):
+    from app.utils.duration_parser import parse_duration_to_minutes
+    assert parse_duration_to_minutes(input) == expected
 ```
+
+### Legacy тесты
+
+32 старых ad-hoc скрипта перемещены в `tests/legacy/`. Не включены в pytest. Можно запускать вручную: `python3 tests/legacy/test_basic.py`.
 
 ---
 
-## 2. Daily Tasks → Plane.so
+## Production Diagnostics (в Telegram)
 
-### Шаги тестирования:
+Админские команды для проверки боевого бота:
 
-- [ ] Отправить боту email-форматированное сообщение (от админа 28795547):
+### `/diag` — System Diagnostics
 
+Проверяет все подсистемы, timeout 10s на каждый check:
+
+| Check | Что проверяет |
+|-------|---------------|
+| Database | `SELECT 1` + count users, latency |
+| Redis | `ping()`, `dbsize()`, members cache |
+| Plane API | `test_connection()`, project count |
+| Webhook | `GET http://localhost:8080/health` |
+| AI Provider | providers_count, default provider |
+| Migrations | `alembic_version` table |
+
+Пример ответа:
 ```
-From: zarudesu@gmail.com
-Subject: Тестовая задача
+System Diagnostics
 
-Создать тестовую задачу в Plane.so через daily tasks
+[OK] Database — 2ms | Users: 5
+[OK] Redis — Connected | Keys: 47
+[OK] Plane API — hhivp | Projects: 27
+[OK] Webhook — 6 routes | ok
+[OK] AI Provider — openrouter (default) | 1 provider(s)
+[OK] Migrations — Current: 013
+
+All systems operational (6/6)
 ```
 
-- [ ] Проверить что бот ответил подтверждением
-- [ ] Открыть https://plane.hhivp.com и проверить что задача создана
-- [ ] Проверить уведомление в Telegram группе (-1001682373643, topic 2231)
+### `/ai_quality [days]` — AI Detection Quality
 
-### Ожидаемый результат:
+Анализирует DetectedIssue записи за N дней (default: 30):
 
-✅ Задача создана в Plane.so
-✅ Уведомление пришло в Telegram группу
+- **Precision**: accepted / (accepted + rejected)
+- **Detection rate**: total / days
+- **Feedback distribution**: accepted, rejected, corrected, no_feedback
+- **Confidence buckets**: accept rate по уровням уверенности
+- **Correction distance**: среднее расстояние редактирования
+- **Per-model stats**: precision по моделям AI
 
-### Что проверить при ошибке:
+### `/plane_audit` — Deep Plane Audit
 
-```bash
-make bot-logs  # Поиск ошибок Plane API
+- Overdue tasks, stale (>7d, >14d), unassigned
+- Workload distribution, recently completed
+- AI recommendations
 
-# Проверить настройки в .env:
-# PLANE_API_URL=https://plane.hhivp.com
-# PLANE_API_TOKEN=plane_api_15504fe9f81f4a819a79ff8409135447
-# PLANE_WORKSPACE_SLUG=hhivp
-# PLANE_CHAT_ID=-1001682373643
-# PLANE_TOPIC_ID=2231
-```
+### `/plane_status` — AI Status Report
+
+- AI-powered analysis open issues by state
+- Highlights stale tasks (>7 days without update)
 
 ---
 
-## 3. Уведомления в группу Telegram
-
-### Шаги тестирования:
-
-- [ ] Создать Work Journal запись (см. п.1)
-- [ ] Проверить что уведомление пришло в группу (-1001682373643)
-- [ ] Создать Daily Task (см. п.2)
-- [ ] Проверить уведомление в группе с топиком 2231
-
-### Ожидаемый результат:
-
-✅ Уведомления приходят в правильную группу
-✅ Plane notifications в правильном топике
-
-### Что проверить при ошибке:
+## Deploy Integration
 
 ```bash
-# Проверить права бота в группе
-# Бот должен иметь права на отправку сообщений
+# deploy.sh автоматически запускает тесты перед деплоем
+./deploy.sh full     # test → push → pull → build → rebuild → logs
+./deploy.sh test     # только pytest (exit 1 при ошибках)
+./deploy.sh diag     # remote health check (curl + container status)
 
-# Проверить WORK_JOURNAL_GROUP_CHAT_ID в .env
-# Должно быть: -1001682373643
+# Makefile
+make test            # pytest tests/unit/
+make test-all        # pytest all + coverage
 ```
-
----
-
-## 4. AI Features (опционально)
-
-### Если добавлен OPENAI_API_KEY:
-
-- [ ] Отправить `/ai Привет!` боту
-- [ ] Проверить что AI ответил
-- [ ] Отправить несколько сообщений в группу
-- [ ] Отправить `/ai_summary` в группе
-- [ ] Проверить что пришла суммаризация
-
-### Ожидаемый результат:
-
-✅ AI отвечает на вопросы
-✅ AI может суммаризировать чат
 
 ---
 
 ## Troubleshooting
 
-### Бот не отвечает
+### Тесты не проходят
+
 ```bash
-make bot-logs
-# Искать ERROR или WARNING
+# Подробный вывод ошибок
+python3 -m pytest tests/unit/ -v --tb=long
+
+# Запуск одного теста
+python3 -m pytest tests/unit/test_plane_models.py::test_is_overdue_past_date -v
 ```
 
-### n8n webhook не работает
-```bash
-# Проверить n8n workflow активен
-curl -H "X-N8N-API-KEY: YOUR_KEY" https://n8n.hhivp.com/api/v1/workflows
-```
+### conftest.py ошибки
 
-### Plane API ошибки
-```bash
-# Тест подключения к Plane
-python3 simple_plane_test.py
-```
+- `ValidationError: Extra inputs are not permitted` → .env файл в CWD содержит лишние переменные. conftest.py делает `os.chdir(tmpdir)` чтобы обойти это.
+- `TypeError: Invalid argument(s) 'pool_size'` → SQLite не поддерживает PG pool params. conftest.py инжектирует mock database module.
 
-### База данных
-```bash
-make db-shell
-# SELECT * FROM users;
-# SELECT * FROM work_journal_entries;
-```
-
----
-
-## После успешного тестирования
-
-- [ ] Все интеграции работают
-- [ ] Логи чистые (нет критичных ошибок)
-- [ ] Данные корректно сохраняются
-- [ ] Уведомления приходят в правильные места
-
-**Можно деплоить на прод!** (но сначала бэкап!)
+### Production бот не отвечает
 
 ```bash
-# На продакшн сервере:
-ssh rd.hhivp.com
-cd /opt/tg-modern-bot
-./deploy.sh  # или как у вас настроено
+ssh hhivp@rd.hhivp.com "docker logs hhivp-bot-app-prod --tail 50"
+ssh hhivp@rd.hhivp.com "docker ps --filter name=hhivp-bot"
+ssh hhivp@rd.hhivp.com "curl -s http://localhost:8083/health"
 ```
