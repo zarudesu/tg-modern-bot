@@ -86,6 +86,7 @@ class ChatAISettings(Base):
     task_detection_enabled = Column(Boolean, default=True)
     daily_summary_enabled = Column(Boolean, default=False)
     auto_answer_questions = Column(Boolean, default=False)
+    notify_task_created = Column(Boolean, default=False)  # Reply in chat when task is created
 
     # Configuration
     context_size = Column(Integer, default=100)  # Max messages for context
@@ -147,6 +148,16 @@ class DetectedIssue(Base):
 
     # Deduplication
     content_hash = Column(String(16), nullable=True, index=True)
+
+    # Training data fields
+    ai_response_json = Column(Text, nullable=True)          # Raw AI response
+    ai_model_used = Column(String(100), nullable=True)       # Model name
+    user_feedback = Column(String(50), nullable=True)        # accepted/rejected/corrected/duplicate_comment
+    user_edited_title = Column(String(255), nullable=True)
+    user_edited_desc = Column(Text, nullable=True)
+    user_assigned_to = Column(String(255), nullable=True)    # Assignee display name
+    feedback_at = Column(DateTime(timezone=True), nullable=True)
+    correction_distance = Column(Float, nullable=True)       # 0.0-1.0 edit distance
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

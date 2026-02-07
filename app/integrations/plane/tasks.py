@@ -548,3 +548,73 @@ class PlaneTasksManager:
         except Exception as e:
             bot_logger.error(f"Error searching issues: {e}")
             return []
+
+    async def get_all_issues_for_audit(
+        self,
+        session: aiohttp.ClientSession,
+        project_id: str,
+        include_done_since_days: int = 30
+    ) -> List[PlaneTask]:
+        """Get ALL issues for audit — including recently completed/cancelled.
+
+        Unlike _get_project_issues, this doesn't skip done/cancelled tasks
+        if they were updated within include_done_since_days.
+        """
+        try:
+            endpoint = f"/api/v1/workspaces/{self.client.workspace_slug}/projects/{project_id}/issues/"
+            params = {"expand": "assignees,state"}
+            data = await self.client.get(session, endpoint, params=params)
+
+            if not data:
+                return []
+
+            issues = []
+            if 'results' in data:
+                issues = data['results']
+            elif 'grouped_by' in data:
+                for group in data['grouped_by'].values():
+                    if isinstance(group, list):
+                        issues.extend(group)
+            elif isinstance(data, list):
+                issues = data
+
+            from datetime import datetime, timedelta, timezone
+            cutoff = datetime.now(timezone.utc) - timedelta(days=include_done_since_days)
+            tasks = []
+
+            for issue in issues:
+                state = issue.get('state', {})
+                state_name = ''
+                if isinstance(state, dict):
+                    state_name = state.get('name', '').lower()
+                    issue['state_detail'] = state
+                    issue['state_name'] = state.get('name', 'Unknown')
+
+                # Skip old done/cancelled tasks
+                if state_name in ('done', 'completed', 'cancelled', 'canceled'):
+                    updated = issue.get('updated_at', '')
+                    try:
+                        dt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+                        if dt < cutoff:
+                            continue
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+
+                # Enrich assignee names
+                assignees = issue.get('assignees', [])
+                names = []
+                for a in assignees:
+                    if isinstance(a, dict):
+                        names.append(a.get('display_name') or a.get('email', '?'))
+                issue['assignee_name'] = ', '.join(names) if names else 'Unassigned'
+
+                try:
+                    tasks.append(PlaneTask(**issue))
+                except Exception:
+                    continue
+
+            return tasks
+
+        except Exception as e:
+            bot_logger.error(f"Error in get_all_issues_for_audit: {e}")
+            return []

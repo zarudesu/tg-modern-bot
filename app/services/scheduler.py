@@ -28,6 +28,8 @@ class DailyTasksScheduler:
         self.plane_analysis_task: Optional[asyncio.Task] = None
         self.plane_analysis_hour = 9  # 09:00 MSK
         self._last_plane_analysis_date = None
+        self.weekly_audit_task: Optional[asyncio.Task] = None
+        self._last_weekly_audit_date = None
     
     async def start(self):
         """Запустить планировщик"""
@@ -41,7 +43,8 @@ class DailyTasksScheduler:
         # self.sync_task = asyncio.create_task(self._cache_sync_loop())
         self.reminder_task = asyncio.create_task(self._reminders_loop())
         self.plane_analysis_task = asyncio.create_task(self._plane_analysis_loop())
-        bot_logger.info("Daily tasks scheduler, reminders and plane analysis started")
+        self.weekly_audit_task = asyncio.create_task(self._weekly_audit_loop())
+        bot_logger.info("Daily tasks scheduler, reminders, plane analysis and weekly audit started")
     
     async def stop(self):
         """Остановить планировщик"""
@@ -74,6 +77,13 @@ class DailyTasksScheduler:
             self.plane_analysis_task.cancel()
             try:
                 await self.plane_analysis_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.weekly_audit_task:
+            self.weekly_audit_task.cancel()
+            try:
+                await self.weekly_audit_task
             except asyncio.CancelledError:
                 pass
 
@@ -420,6 +430,77 @@ class DailyTasksScheduler:
 
         except Exception as e:
             bot_logger.error(f"Error in scheduled plane analysis: {e}")
+
+    async def _weekly_audit_loop(self):
+        """Weekly Plane audit on Monday at 09:00 MSK."""
+        tz = pytz.timezone(settings.daily_tasks_timezone)
+
+        while self.running:
+            try:
+                now = datetime.now(tz)
+                today = now.date()
+
+                # Monday = 0
+                if (
+                    now.weekday() == 0
+                    and now.hour == 9
+                    and self._last_weekly_audit_date != today
+                ):
+                    self._last_weekly_audit_date = today
+                    await self._run_weekly_audit()
+
+                await asyncio.sleep(60)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                bot_logger.error(f"Error in weekly audit loop: {e}")
+                await asyncio.sleep(300)
+
+    async def _run_weekly_audit(self):
+        """Execute weekly audit and send to admin chat."""
+        from ..handlers.plane_audit import generate_audit_report_text
+        from ..core.ai.ai_manager import ai_manager
+
+        chat_id = settings.plane_chat_id
+        topic_id = settings.plane_topic_id
+        if not chat_id:
+            bot_logger.warning("plane_chat_id not set, skipping weekly audit")
+            return
+
+        try:
+            report = await generate_audit_report_text()
+            if not report:
+                return
+
+            # AI summary
+            if ai_manager.providers_count > 0:
+                try:
+                    ai_response = await ai_manager.chat(
+                        user_message=(
+                            f"Еженедельный аудит Plane:\n{report}\n\n"
+                            f"Кратко (3-5 предложений): ключевые проблемы и рекомендации на неделю."
+                        ),
+                        system_prompt="Ты помощник руководителя IT. Кратко и конкретно."
+                    )
+                    if ai_response and ai_response.content:
+                        report += f"\n\n🤖 <b>AI:</b> {ai_response.content}"
+                except Exception as e:
+                    bot_logger.warning(f"Weekly audit AI failed: {e}")
+
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_token)
+            try:
+                kwargs = {"chat_id": chat_id, "text": report, "parse_mode": "HTML"}
+                if topic_id:
+                    kwargs["message_thread_id"] = topic_id
+                await bot.send_message(**kwargs)
+                bot_logger.info("Weekly Plane audit sent")
+            finally:
+                await bot.session.close()
+
+        except Exception as e:
+            bot_logger.error(f"Error in weekly audit: {e}")
 
     def is_running(self) -> bool:
         """Проверить, запущен ли планировщик"""

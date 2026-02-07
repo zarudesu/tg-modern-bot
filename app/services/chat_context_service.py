@@ -239,7 +239,9 @@ class ChatContextService:
         confidence: Optional[float] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
-        original_text: Optional[str] = None
+        original_text: Optional[str] = None,
+        ai_response_json: Optional[str] = None,
+        ai_model_used: Optional[str] = None
     ) -> DetectedIssue:
         """Store a detected issue"""
         async with AsyncSessionLocal() as session:
@@ -252,7 +254,9 @@ class ChatContextService:
                 title=title,
                 description=description,
                 original_text=original_text,
-                status='new'
+                status='new',
+                ai_response_json=ai_response_json,
+                ai_model_used=ai_model_used
             )
 
             session.add(issue)

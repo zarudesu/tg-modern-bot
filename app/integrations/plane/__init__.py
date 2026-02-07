@@ -326,6 +326,23 @@ class PlaneAPI:
             bot_logger.error(f"Error creating comment: {e}")
             return None
 
+    async def get_all_issues_for_audit(
+        self,
+        project_id: str,
+        include_done_since_days: int = 30
+    ) -> List:
+        """Get all issues for audit (including recently completed)."""
+        if not self.configured:
+            return []
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await self._tasks_manager.get_all_issues_for_audit(
+                    session, project_id, include_done_since_days
+                )
+        except Exception as e:
+            bot_logger.error(f"Error in get_all_issues_for_audit: {e}")
+            return []
+
     async def search_issues(
         self,
         project_id: str,

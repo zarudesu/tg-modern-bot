@@ -178,9 +178,12 @@ class ChatSummaryHandler(EventHandler):
 # Регистрируем обработчики при загрузке модуля
 async def register_ai_handlers():
     """Регистрация AI обработчиков событий"""
-    event_bus.register_handler(AutoTaskDetectionHandler())
+    # AutoTaskDetectionHandler DISABLED — дублирует n8n путь и не фильтрует чаты,
+    # отправляя "Обнаружена задача!" в клиентские чаты. n8n путь корректно
+    # фильтрует через ChatPlaneMapping + поддерживает контекст и дедупликацию.
+    # event_bus.register_handler(AutoTaskDetectionHandler())
     event_bus.register_handler(ChatSummaryHandler())
-    bot_logger.info("AI event handlers registered")
+    bot_logger.info("AI event handlers registered (AutoTaskDetection disabled, using n8n path)")
 
 
 # Вызываем регистрацию при импорте

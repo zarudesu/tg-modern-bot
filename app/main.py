@@ -356,6 +356,16 @@ async def main():
         dp.include_router(plane_analysis_router)
         bot_logger.info("✅ Plane Analysis module loaded")
 
+        # 7.5. Plane Audit - /plane_audit command
+        from .handlers.plane_audit import router as plane_audit_router
+        dp.include_router(plane_audit_router)
+        bot_logger.info("✅ Plane Audit module loaded")
+
+        # 7.6. AI Training Export - /ai_export command
+        from .handlers.ai_training_export import router as ai_export_router
+        dp.include_router(ai_export_router)
+        bot_logger.info("✅ AI Training Export module loaded")
+
         # 8. Chat Support module - /request and /task commands
         from .modules.chat_support.router import router as chat_support_router
         dp.include_router(chat_support_router)

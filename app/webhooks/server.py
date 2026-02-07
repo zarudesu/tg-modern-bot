@@ -664,6 +664,25 @@ class WebhookServer:
             confidence = detection.get('confidence', 0)
             task_data = detection.get('task_data', {})
 
+            # Store DetectedIssue for training data
+            try:
+                from ..services.chat_context_service import chat_context_service
+                import json as json_lib
+                await chat_context_service.store_detected_issue(
+                    chat_id=original.get('chat_id', 0),
+                    issue_type='task',
+                    message_id=original.get('message_id'),
+                    user_id=original.get('user_id'),
+                    confidence=confidence / 100.0 if confidence > 1 else confidence,
+                    title=task_data.get('title'),
+                    description=task_data.get('description'),
+                    original_text=original.get('text'),
+                    ai_response_json=json_lib.dumps(detection, ensure_ascii=False, default=str),
+                    ai_model_used=data.get('ai_model', 'n8n/openrouter')
+                )
+            except Exception as e:
+                bot_logger.warning(f"Failed to store DetectedIssue for training: {e}")
+
             # ==== Авто-создание (высокая уверенность >= 75%) ====
             # Бот сам создаёт задачу с dedup check (не n8n)
             if action in ('auto_created', 'auto_create'):
@@ -749,18 +768,27 @@ class WebhookServer:
 
                     if issue and chat_id:
                         seq_id = issue.get('sequence_id', '?')
-                        await self.bot.send_message(
-                            chat_id=chat_id,
-                            text=(
-                                f"✅ <b>Задача автоматически создана</b>\n\n"
-                                f"📝 <b>{task_data.get('title', 'Без названия')}</b>\n"
-                                f"📊 Проект: {plane.get('project_name', 'N/A')}\n"
-                                f"🔢 Номер: #{seq_id}\n\n"
-                                f"<i>AI уверенность: {confidence}%</i>"
-                            ),
-                            reply_to_message_id=message_id,
-                            parse_mode="HTML"
-                        )
+
+                        # Check if chat has notify_task_created enabled
+                        should_notify = False
+                        try:
+                            from ..services.chat_context_service import chat_context_service
+                            chat_settings = await chat_context_service.get_chat_settings(int(chat_id))
+                            should_notify = chat_settings and getattr(chat_settings, 'notify_task_created', False)
+                        except Exception:
+                            pass
+
+                        if should_notify:
+                            await self.bot.send_message(
+                                chat_id=chat_id,
+                                text=(
+                                    f"✅ Задача <b>#{seq_id}</b> создана в "
+                                    f"<b>{plane.get('project_name', 'N/A')}</b>\n\n"
+                                    f"📝 {task_data.get('title', 'Без названия')}"
+                                ),
+                                reply_to_message_id=message_id,
+                                parse_mode="HTML"
+                            )
 
                     return web.json_response({
                         'status': 'processed',
