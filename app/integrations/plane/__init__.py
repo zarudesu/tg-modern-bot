@@ -199,7 +199,8 @@ class PlaneAPI:
         description: str = "",
         priority: str = "medium",
         labels: Optional[List[str]] = None,
-        assignees: Optional[List[str]] = None
+        assignees: Optional[List[str]] = None,
+        target_date: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new issue in Plane
@@ -210,6 +211,8 @@ class PlaneAPI:
             description: Issue description
             priority: Priority level (urgent, high, medium, low, none)
             labels: List of label names
+            assignees: List of user UUIDs
+            target_date: Due date in YYYY-MM-DD format
 
         Returns:
             Created issue data or None on failure
@@ -227,7 +230,8 @@ class PlaneAPI:
                     description=description,
                     priority=priority,
                     labels=labels,
-                    assignees=assignees
+                    assignees=assignees,
+                    target_date=target_date,
                 )
         except Exception as e:
             bot_logger.error(f"Error creating issue: {e}")

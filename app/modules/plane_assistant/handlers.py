@@ -307,6 +307,20 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext, s
     text, action = _extract_action(ai_text)
 
     if action:
+        # create_task → interactive draft flow
+        if action.get("action") == "create_task":
+            draft = {
+                "project": action.get("project", ""),
+                "name": action.get("name", ""),
+                "priority": action.get("priority", "none"),
+                "assignee": action.get("assignee", ""),
+                "target_date": action.get("target_date", ""),
+                "description": action.get("description", ""),
+            }
+            await state.update_data(task_draft=draft)
+            await state.set_state(PlaneAssistantStates.drafting_task)
+            return "DRAFT_TASK", draft
+
         if not text:
             seq = action.get("seq_id", "?")
             act = action.get("action", "")
@@ -314,7 +328,6 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext, s
                 "close_issue": f"Закрываю задачу <b>#{seq}</b>",
                 "assign_issue": f"Назначаю <b>#{seq}</b> на {action.get('assignee', '?')}",
                 "comment_issue": f"Добавляю комментарий к <b>#{seq}</b>",
-                "create_task": f"Создаю задачу: <b>{action.get('name', '?')}</b>",
             }
             text = fallbacks.get(act, f"Выполняю действие с #{seq}")
 
@@ -368,11 +381,7 @@ async def cmd_plane(message: Message, state: FSMContext, bot: Bot):
 
     try:
         result = await _process_message(user_text, message.from_user.id, state, status_msg=status)
-        if isinstance(result, tuple):
-            text, action = result
-            await _send_confirmation(status, text, action)
-        else:
-            await _safe_edit(status, result)
+        await _dispatch_result(result, status, state)
     except Exception as e:
         bot_logger.error(f"/plane error: {e}", exc_info=True)
         await status.edit_text(f"Ошибка: {e}", parse_mode=None)
@@ -385,11 +394,7 @@ async def handle_followup(message: Message, state: FSMContext, bot: Bot):
 
     try:
         result = await _process_message(message.text, message.from_user.id, state, status_msg=status)
-        if isinstance(result, tuple):
-            text, action = result
-            await _send_confirmation(status, text, action)
-        else:
-            await _safe_edit(status, result)
+        await _dispatch_result(result, status, state)
     except Exception as e:
         bot_logger.error(f"/plane followup error: {e}", exc_info=True)
         await status.edit_text(f"Ошибка: {e}", parse_mode=None)
@@ -420,13 +425,8 @@ async def handle_voice(message: Message, state: FSMContext, bot: Bot):
 
         result = await _process_message(transcription, message.from_user.id, state)
 
-        if isinstance(result, tuple):
-            text, action = result
-            full_text = f"<i>Голос:</i> {_escape_html(transcription[:150])}\n\n{text}"
-            await _send_confirmation(status, full_text, action)
-        else:
-            prefix = f"<i>Голос:</i> {_escape_html(transcription[:150])}\n\n"
-            await _safe_edit(status, prefix + result)
+        voice_prefix = f"<i>Голос:</i> {_escape_html(transcription[:150])}\n\n"
+        await _dispatch_result(result, status, state, text_prefix=voice_prefix)
 
     except Exception as e:
         bot_logger.error(f"/plane voice error: {e}", exc_info=True)
@@ -448,6 +448,283 @@ async def cmd_plane_exit(message: Message, state: FSMContext):
 
 
 # ---- Write action confirmation ----
+
+async def _dispatch_result(result, status_msg: Message, state: FSMContext, text_prefix: str = ""):
+    """Route _process_message result to the right UI."""
+    if isinstance(result, tuple):
+        marker, payload = result
+        if marker == "DRAFT_TASK":
+            # Interactive task draft
+            text = _render_draft(payload)
+            kb = _draft_keyboard(payload)
+            if text_prefix:
+                text = text_prefix + text
+            await _safe_edit(status_msg, text, reply_markup=kb)
+            return
+        # Regular confirm (close/assign/comment)
+        text, action = marker, payload
+        if text_prefix:
+            text = text_prefix + text
+        await _send_confirmation(status_msg, text, action)
+    else:
+        if text_prefix:
+            result = text_prefix + result
+        await _safe_edit(status_msg, result)
+
+
+PRIORITY_LABELS = {
+    "urgent": "🔴 Срочно",
+    "high": "🟠 Высокий",
+    "medium": "🟡 Средний",
+    "low": "🟢 Низкий",
+    "none": "⚪ Без приоритета",
+}
+
+
+def _render_draft(draft: dict) -> str:
+    """Render task draft as HTML message."""
+    project = _escape_html(draft.get("project", "—"))
+    name = _escape_html(draft.get("name", "—"))
+    prio = PRIORITY_LABELS.get(draft.get("priority", "none"), "⚪ Без приоритета")
+    assignee = _escape_html(draft.get("assignee", "")) or "не указан"
+    target = _escape_html(draft.get("target_date", "")) or "не указан"
+    desc = _escape_html(draft.get("description", "")) or "—"
+
+    lines = [
+        "<b>📋 Новая задача (черновик)</b>",
+        "",
+        f"📌 <b>Проект:</b> {project}",
+        f"📝 <b>Название:</b> {name}",
+        f"🔥 <b>Приоритет:</b> {prio}",
+        f"👤 <b>Исполнитель:</b> {assignee}",
+        f"📅 <b>Дедлайн:</b> {target}",
+    ]
+    if desc != "—":
+        lines.append(f"📄 <b>Описание:</b> {desc}")
+
+    lines.append("")
+    lines.append("<i>Напиши чтобы изменить, или нажми кнопку:</i>")
+    return "\n".join(lines)
+
+
+def _draft_keyboard(draft: dict) -> InlineKeyboardMarkup:
+    """Build inline keyboard for task draft."""
+    current = draft.get("priority", "none")
+
+    prio_buttons = []
+    for key, label in PRIORITY_LABELS.items():
+        text = f"• {label} •" if key == current else label
+        prio_buttons.append(
+            InlineKeyboardButton(text=text, callback_data=f"draft_prio:{key}")
+        )
+
+    rows = [
+        prio_buttons[:3],
+        prio_buttons[3:],
+        [
+            InlineKeyboardButton(text="✅ Создать", callback_data="draft:create"),
+            InlineKeyboardButton(text="🗑 Очистить", callback_data="draft:clear"),
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("draft_prio:"))
+async def on_draft_priority(callback: CallbackQuery, state: FSMContext):
+    """Change priority in task draft."""
+    prio = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    draft = data.get("task_draft", {})
+    draft["priority"] = prio
+    await state.update_data(task_draft=draft)
+    await callback.answer(PRIORITY_LABELS.get(prio, prio))
+
+    text = _render_draft(draft)
+    kb = _draft_keyboard(draft)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "draft:create")
+async def on_draft_create(callback: CallbackQuery, state: FSMContext):
+    """Create task from draft."""
+    data = await state.get_data()
+    draft = data.get("task_draft", {})
+
+    if not draft.get("name") or not draft.get("project"):
+        await callback.answer("Укажи проект и название", show_alert=True)
+        return
+
+    await callback.answer("Создаю задачу...")
+
+    result_text = await _handle_create_task_from_draft(draft)
+    await callback.message.edit_text(f"<b>{result_text}</b>", parse_mode="HTML")
+    await state.update_data(task_draft=None)
+    await state.set_state(PlaneAssistantStates.conversation)
+
+
+@router.callback_query(F.data == "draft:clear")
+async def on_draft_clear(callback: CallbackQuery, state: FSMContext):
+    """Clear task draft, back to conversation."""
+    await state.update_data(task_draft=None)
+    await state.set_state(PlaneAssistantStates.conversation)
+    await callback.message.edit_text("Черновик очищен.", parse_mode=None)
+    await callback.answer()
+
+
+@router.message(PlaneAssistantStates.drafting_task, F.text, ~F.text.startswith("/"))
+async def handle_draft_edit(message: Message, state: FSMContext):
+    """Handle natural-language edits to task draft."""
+    data = await state.get_data()
+    draft = data.get("task_draft", {})
+    text = message.text.strip()
+    text_lower = text.lower()
+
+    changed = False
+
+    # Priority keywords
+    prio_map = {
+        "срочн": "urgent", "urgent": "urgent", "критич": "urgent",
+        "высок": "high", "high": "high", "важн": "high",
+        "средн": "medium", "medium": "medium", "норм": "medium",
+        "низк": "low", "low": "low",
+    }
+    for kw, val in prio_map.items():
+        if kw in text_lower:
+            draft["priority"] = val
+            changed = True
+            break
+
+    # Assignee: "на Тимофея", "назначь Тимофею", "исполнитель Тимофей"
+    assign_match = re.search(r'(?:на|назначь|исполнитель)\s+([А-Яа-яA-Za-z]+)', text)
+    if assign_match:
+        draft["assignee"] = assign_match.group(1)
+        changed = True
+
+    # Date: "дедлайн завтра", "до 15.02", "срок 2026-02-15"
+    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', text)
+    if date_match:
+        draft["target_date"] = date_match.group(1)
+        changed = True
+    elif re.search(r'(\d{1,2})[./](\d{1,2})', text):
+        dm = re.search(r'(\d{1,2})[./](\d{1,2})', text)
+        from datetime import date as dt_date
+        try:
+            day, month = int(dm.group(1)), int(dm.group(2))
+            year = dt_date.today().year
+            d = dt_date(year, month, day)
+            if d < dt_date.today():
+                d = d.replace(year=year + 1)
+            draft["target_date"] = d.isoformat()
+            changed = True
+        except ValueError:
+            pass
+    elif "завтра" in text_lower:
+        from datetime import date as dt_date, timedelta
+        draft["target_date"] = (dt_date.today() + timedelta(days=1)).isoformat()
+        changed = True
+    elif "послезавтра" in text_lower:
+        from datetime import date as dt_date, timedelta
+        draft["target_date"] = (dt_date.today() + timedelta(days=2)).isoformat()
+        changed = True
+    elif re.search(r'через\s+(\d+)\s+дн', text_lower):
+        from datetime import date as dt_date, timedelta
+        days = int(re.search(r'через\s+(\d+)\s+дн', text_lower).group(1))
+        draft["target_date"] = (dt_date.today() + timedelta(days=days)).isoformat()
+        changed = True
+    elif "неделю" in text_lower or "неделя" in text_lower:
+        from datetime import date as dt_date, timedelta
+        draft["target_date"] = (dt_date.today() + timedelta(days=7)).isoformat()
+        changed = True
+
+    # Description: "описание: ..." or anything else that didn't match above
+    desc_match = re.search(r'описание[:\s]+(.+)', text, re.IGNORECASE)
+    if desc_match:
+        draft["description"] = desc_match.group(1).strip()
+        changed = True
+
+    # Name change: "название: ..."
+    name_match = re.search(r'(?:название|задача)[:\s]+(.+)', text, re.IGNORECASE)
+    if name_match:
+        draft["name"] = name_match.group(1).strip()
+        changed = True
+
+    # Project change: "проект: ..."
+    proj_match = re.search(r'проект[:\s]+(\S+)', text, re.IGNORECASE)
+    if proj_match:
+        draft["project"] = proj_match.group(1).strip()
+        changed = True
+
+    if not changed:
+        # Treat whole text as description if nothing matched
+        draft["description"] = text
+        changed = True
+
+    await state.update_data(task_draft=draft)
+    reply = _render_draft(draft)
+    kb = _draft_keyboard(draft)
+    await message.answer(reply, parse_mode="HTML", reply_markup=kb)
+
+
+async def _handle_create_task_from_draft(draft: dict) -> str:
+    """Create a Plane task from the interactive draft."""
+    project_ident = draft.get("project", "")
+    name = draft.get("name", "")
+    priority = draft.get("priority", "none")
+    assignee_name = draft.get("assignee")
+    target_date = draft.get("target_date")
+    description = draft.get("description", "")
+
+    if not project_ident or not name:
+        return "✗ Не указан проект или название задачи"
+
+    # Find project
+    projects = await plane_api.get_all_projects()
+    project = None
+    ident_upper = project_ident.upper()
+    for p in (projects or []):
+        if ident_upper in (p.get('identifier', '').upper(), p.get('name', '').upper()):
+            project = p
+            break
+    if not project:
+        for p in (projects or []):
+            if ident_upper in p.get('name', '').upper() or ident_upper in p.get('identifier', '').upper():
+                project = p
+                break
+    if not project:
+        return f"✗ Проект '{project_ident}' не найден"
+
+    pid = project['id']
+
+    # Resolve assignee
+    assignee_ids = []
+    if assignee_name:
+        members = await plane_api.get_workspace_members()
+        for m in (members or []):
+            mname = m.display_name if hasattr(m, 'display_name') else m.get('display_name', '')
+            first = m.first_name if hasattr(m, 'first_name') else m.get('first_name', '')
+            if assignee_name.lower() in f"{first} {mname}".lower():
+                mid = m.id if hasattr(m, 'id') else m.get('id')
+                assignee_ids = [mid]
+                break
+
+    result = await plane_api.create_issue(
+        project_id=pid,
+        name=name,
+        priority=priority,
+        assignees=assignee_ids or None,
+        description=description,
+        target_date=target_date,
+    )
+
+    if result:
+        seq = result.get('sequence_id', '?')
+        pname = project.get('identifier', '?')
+        return f"✓ Создана {pname}-{seq}: {name}"
+    return "✗ Ошибка при создании задачи"
+
 
 async def _send_confirmation(status_msg: Message, text: str, action: dict):
     """Show confirmation keyboard for write action."""

@@ -12,6 +12,10 @@ from .users import PlaneUsersManager
 from .exceptions import PlaneAPIError
 
 
+def _escape_html_simple(text: str) -> str:
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 class PlaneTasksManager:
     """Manage Plane tasks (issues)"""
 
@@ -426,7 +430,8 @@ class PlaneTasksManager:
         description: str = "",
         priority: str = "medium",
         labels: Optional[List[str]] = None,
-        assignees: Optional[List[str]] = None
+        assignees: Optional[List[str]] = None,
+        target_date: Optional[str] = None,
     ) -> Optional[Dict]:
         """
         Create a new issue in Plane
@@ -439,6 +444,7 @@ class PlaneTasksManager:
             priority: Priority level (urgent, high, medium, low, none)
             labels: List of label UUIDs to attach
             assignees: List of user UUIDs to assign
+            target_date: Due date in YYYY-MM-DD format
 
         Returns:
             Created issue data or None on failure
@@ -454,7 +460,11 @@ class PlaneTasksManager:
 
             # Plane requires valid HTML in description_html; omit if empty
             if description:
-                issue_data["description_html"] = f"<p>{description}</p>"
+                issue_data["description_html"] = f"<p>{_escape_html_simple(description)}</p>"
+
+            # Due date
+            if target_date:
+                issue_data["target_date"] = target_date
 
             # Add labels if provided
             if labels:
