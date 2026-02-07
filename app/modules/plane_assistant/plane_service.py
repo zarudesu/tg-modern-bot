@@ -1,9 +1,11 @@
 """Plane data layer for /plane assistant.
 
 Collects data from Plane API and prepares it for AI analysis.
+Uses Redis caching to avoid 27 API calls per request.
 """
 
 import aiohttp
+import json
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 
@@ -12,10 +14,33 @@ from ...services.redis_service import redis_service
 from ...utils.logger import bot_logger
 
 CACHE_TTL = 300  # 5 min
+DATA_CACHE_TTL = 120  # 2 min for formatted task data
+
+
+async def _cached_get(cache_key: str, fetch_fn, ttl: int = DATA_CACHE_TTL) -> str:
+    """Get cached string result or fetch and cache."""
+    cached = await redis_service.get_json(cache_key)
+    if cached and isinstance(cached, dict) and "v" in cached:
+        return cached["v"]
+    result = await fetch_fn()
+    try:
+        await redis_service.set_json(cache_key, {"v": result}, ttl=ttl)
+    except Exception:
+        pass
+    return result
 
 
 async def get_my_tasks_summary(user_email: str) -> str:
     """Get all open tasks for user, formatted as text for AI."""
+    cache_key = f"plane_tasks:{user_email}"
+
+    async def _fetch():
+        return await _build_my_tasks_summary(user_email)
+
+    return await _cached_get(cache_key, _fetch)
+
+
+async def _build_my_tasks_summary(user_email: str) -> str:
     tasks = await plane_api.get_user_tasks(user_email)
     if not tasks:
         return "У пользователя нет открытых задач."
@@ -96,6 +121,15 @@ async def get_project_tasks_summary(project_identifier: str) -> str:
 
 async def get_overdue_summary(user_email: str) -> str:
     """Get overdue and stale tasks."""
+    cache_key = f"plane_overdue:{user_email}"
+
+    async def _fetch():
+        return await _build_overdue_summary(user_email)
+
+    return await _cached_get(cache_key, _fetch)
+
+
+async def _build_overdue_summary(user_email: str) -> str:
     tasks = await plane_api.get_user_tasks(user_email)
     if not tasks:
         return "Нет открытых задач."
@@ -150,6 +184,15 @@ async def get_overdue_summary(user_email: str) -> str:
 
 async def get_workload_summary() -> str:
     """Get team workload distribution."""
+    cache_key = "plane_workload"
+
+    async def _fetch():
+        return await _build_workload_summary()
+
+    return await _cached_get(cache_key, _fetch, ttl=300)
+
+
+async def _build_workload_summary() -> str:
     members = await plane_api.get_workspace_members()
     if not members:
         return "Не удалось загрузить участников."

@@ -443,19 +443,22 @@ class WebhookServer:
                 f"📨 Plane direct webhook: event={event}, action={action}"
             )
 
-            # FILTER: Only process issue updates with completed state
-            # This replaces n8n "Filter: Only Done State Changes" function
-            if event != 'issue' or action != 'updated':
+            # Route: comment on issue → lightweight notification
+            if event == 'issue_comment' and action == 'created':
+                return await self._notify_plane_event(data, event, action)
+
+            # Only process issue events from here
+            if event != 'issue':
                 bot_logger.debug(f"⏭️ Ignoring: event={event}, action={action}")
-                return web.json_response({'status': 'ignored', 'reason': 'Not issue update'})
+                return web.json_response({'status': 'ignored', 'reason': f'Unhandled event: {event}'})
 
             issue_data = data.get('data', {})
             state = issue_data.get('state', {})
             state_group = state.get('group', '')
 
-            if state_group != 'completed':
-                bot_logger.debug(f"⏭️ Ignoring: state.group={state_group} (not completed)")
-                return web.json_response({'status': 'ignored', 'reason': 'Not completed state'})
+            # Route: new issue or non-completion update → lightweight notification
+            if action == 'created' or state_group != 'completed':
+                return await self._notify_plane_event(data, event, action)
 
             # TRANSFORM: Convert Plane format to our internal format
             # This replaces n8n "Transform Data" function
@@ -1091,6 +1094,113 @@ class WebhookServer:
                 extra={"traceback": traceback.format_exc()}
             )
             return web.json_response({'error': 'Internal server error'}, status=500)
+
+    async def _notify_plane_event(self, data: dict, event: str, action: str) -> Response:
+        """Send lightweight Plane event notification to relevant users.
+
+        Handles: new comments, new issues, non-completion updates.
+        Rate-limits non-comment updates to 1 per issue per 5 min.
+        """
+        issue_data = data.get('data', {})
+        activity = data.get('activity', {})
+        actor = activity.get('actor', {})
+        actor_name = actor.get('display_name', actor.get('first_name', ''))
+        actor_email = actor.get('email', '')
+
+        def esc(t):
+            return str(t).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;') if t else ''
+
+        # Build notification based on event type
+        if event == 'issue_comment':
+            issue_detail = issue_data.get('issue_detail', {})
+            seq_id = issue_detail.get('sequence_id', issue_data.get('sequence_id', '?'))
+            title = issue_detail.get('name', issue_data.get('name', ''))
+            comment = issue_data.get('comment_stripped', '')[:200]
+            notification = (
+                f"💬 Комментарий к <b>#{seq_id}</b> {esc(title[:60])}\n\n"
+                f"<i>{esc(comment)}</i>\n"
+                f"— {esc(actor_name)}"
+            )
+        elif action == 'created':
+            seq_id = issue_data.get('sequence_id', '?')
+            title = issue_data.get('name', '')
+            priority = issue_data.get('priority', '')
+            prio_icon = {'urgent': '🔴 ', 'high': '🟠 '}.get(priority, '')
+            notification = f"📋 Новая задача <b>#{seq_id}</b>\n<b>{esc(title[:80])}</b>"
+            if priority and priority != 'none':
+                notification += f"\n{prio_icon}{priority}"
+            notification += f"\n— {esc(actor_name)}"
+        else:
+            # Issue updated (non-completion)
+            seq_id = issue_data.get('sequence_id', '?')
+            title = issue_data.get('name', '')
+            state_name = issue_data.get('state', {}).get('name', '')
+            priority = issue_data.get('priority', '')
+            parts = []
+            if state_name:
+                parts.append(state_name)
+            if priority in ('urgent', 'high'):
+                parts.append(f"⚡ {priority}")
+            detail = " | ".join(parts)
+            notification = f"🔄 <b>#{seq_id}</b> {esc(title[:60])}"
+            if detail:
+                notification += f"\n{esc(detail)}"
+            notification += f"\n— {esc(actor_name)}"
+
+        # Rate limit non-comment updates (max 1 per issue per 5 min)
+        if event != 'issue_comment':
+            from ..services.redis_service import redis_service
+            rate_key = f"plane_notif:{seq_id}"
+            if await redis_service.exists(rate_key):
+                bot_logger.debug(f"⏭️ Rate limited notification for #{seq_id}")
+                return web.json_response({'status': 'rate_limited'})
+            await redis_service.set_json(rate_key, True, ttl=300)
+
+        # Resolve recipients: assignees → Telegram IDs, exclude actor
+        recipients = set()
+        try:
+            assignees = issue_data.get('assignees', [])
+            if not assignees and event == 'issue_comment':
+                assignees = issue_data.get('issue_detail', {}).get('assignees', [])
+
+            if assignees:
+                async for session in get_async_session():
+                    from ..services.plane_mappings_service import PlaneMappingsService
+                    svc = PlaneMappingsService(session)
+                    for a in assignees:
+                        ident = (a.get('email') or a.get('display_name', '')) if isinstance(a, dict) else str(a)
+                        if ident:
+                            tid = await svc.get_telegram_id(ident)
+                            if tid:
+                                recipients.add(tid)
+                    # Exclude actor (don't notify yourself)
+                    if actor_email:
+                        actor_tid = await svc.get_telegram_id(actor_email)
+                        if actor_tid:
+                            recipients.discard(actor_tid)
+        except Exception as e:
+            bot_logger.debug(f"Could not resolve Plane notification recipients: {e}")
+
+        if not recipients:
+            recipients = set(settings.admin_user_id_list)
+
+        # Send notifications
+        from aiogram.types import LinkPreviewOptions
+        sent = 0
+        for rid in recipients:
+            try:
+                await self.bot.send_message(
+                    chat_id=rid,
+                    text=notification.strip(),
+                    parse_mode="HTML",
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+                sent += 1
+            except Exception as e:
+                bot_logger.warning(f"Failed to send Plane notification to {rid}: {e}")
+
+        bot_logger.info(f"📨 Plane event {event}/{action} #{seq_id}: notified {sent} users")
+        return web.json_response({'status': 'notified', 'event': event, 'action': action, 'recipients': sent})
 
     def _verify_signature(self, payload: str, signature: str, secret: str) -> bool:
         """Проверка подписи webhook"""

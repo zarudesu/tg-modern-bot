@@ -67,29 +67,31 @@ async def on_startup(bot: Bot):
 
         ai_initialized = False
 
-        # 1. Пробуем OpenRouter (работает из РФ, бесплатные модели)
+        # 1. Groq — быстрый и умный (llama-3.3-70b), primary для /plane
+        if groq_key:
+            ai_manager.create_groq_provider(
+                api_key=groq_key,
+                model="llama-3.3-70b-versatile",
+                name="groq",
+                set_as_default=False,
+                temperature=0.7,
+                max_tokens=2000
+            )
+            bot_logger.info("✅ Groq provider registered (llama-3.3-70b)")
+            ai_initialized = True
+
+        # 2. OpenRouter — fallback, бесплатные модели, работает из РФ
         if openrouter_key:
             ai_manager.create_openrouter_provider(
                 api_key=openrouter_key,
-                model="arcee-ai/trinity-large-preview:free",  # Бесплатная, поддерживает system prompt, работает из РФ
+                model="arcee-ai/trinity-large-preview:free",
+                name="openrouter",
                 set_as_default=True,
                 temperature=0.7,
                 max_tokens=1500,
                 site_name="HHIVP IT Bot"
             )
-            bot_logger.info("✅ AI Manager initialized with OpenRouter (FREE models)")
-            ai_initialized = True
-
-        # 2. Fallback на Groq (заблокирован из РФ, но оставляем)
-        elif groq_key:
-            ai_manager.create_groq_provider(
-                api_key=groq_key,
-                model="llama-3.1-8b-instant",
-                set_as_default=True,
-                temperature=0.7,
-                max_tokens=1500
-            )
-            bot_logger.info("✅ AI Manager initialized with Groq")
+            bot_logger.info("✅ OpenRouter provider registered (default)")
             ai_initialized = True
 
         # 3. Fallback на OpenAI
@@ -150,6 +152,12 @@ async def on_startup(bot: Bot):
             bot_logger.error(f"Scheduler error: {e}")
             bot_logger.info("Daily tasks scheduler disabled due to error")
         
+        # Morning digest loop (AI-powered daily summary at 09:00 MSK)
+        if ai_initialized and plane_api.configured:
+            from .modules.plane_assistant.daily_digest import digest_loop
+            asyncio.create_task(digest_loop(bot))
+            bot_logger.info("✅ Plane morning digest loop started")
+
         # Настройка команд бота
         await setup_bot_commands(bot)
         
