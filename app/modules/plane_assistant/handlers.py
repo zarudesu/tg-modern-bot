@@ -70,7 +70,8 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so.
    {{"action": "archive_issue", "seq_id": 123}}
    {{"action": "create_task", "project": "HARZL", "name": "Название задачи", "priority": "high", "assignee": "Тимофей"}}
 6. СТАТУСЫ (status): "backlog", "unstarted", "started", "completed", "cancelled".
-   "в работе" = "started", "бэклог" = "backlog", "сделано"/"закрой" = "completed".
+   "в работе" = "started", "бэклог" = "backlog", "сделано" = "completed".
+   "закрой" / "выполнено" / "done" → используй close_issue, НЕ update_status!
 7. ПРИОРИТЕТЫ (priority): "urgent", "high", "medium", "low", "none".
    Даты: "дедлайн/начало завтра" → вычисли дату YYYY-MM-DD. "" = убрать.
 8. Работай ТОЛЬКО с реальными данными ниже.
@@ -841,9 +842,28 @@ async def on_confirm(callback: CallbackQuery, state: FSMContext):
 
             if action_name == "close_issue":
                 ok = await plane_service.close_issue(project_id, issue["id"])
-                result_text = f"✓ Задача #{seq_id} закрыта" if ok else f"✗ Не удалось закрыть #{seq_id}"
                 if ok and action.get("comment"):
                     await plane_service.add_comment(project_id, issue["id"], action["comment"])
+                if ok:
+                    # Ask about archiving
+                    await state.update_data(
+                        pending_action=None,
+                        archive_project_id=project_id,
+                        archive_issue_id=issue["id"],
+                        archive_seq_id=seq_id,
+                    )
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="📦 Архивировать", callback_data="plane_act:archive_after"),
+                        InlineKeyboardButton(text="Нет", callback_data="plane_act:skip_archive"),
+                    ]])
+                    await callback.message.edit_text(
+                        f"<b>✓ Задача #{seq_id} закрыта</b>\n\nАрхивировать тоже?",
+                        parse_mode="HTML", reply_markup=kb,
+                    )
+                    await callback.answer()
+                    return
+                else:
+                    result_text = f"✗ Не удалось закрыть #{seq_id}"
 
             elif action_name == "assign_issue":
                 assignee = action.get("assignee", "")
@@ -966,6 +986,41 @@ async def on_cancel(callback: CallbackQuery, state: FSMContext):
     await state.update_data(pending_action=None)
     await state.set_state(PlaneAssistantStates.conversation)
     await callback.message.edit_text("Действие отменено.", parse_mode=None)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "plane_act:archive_after")
+async def on_archive_after_close(callback: CallbackQuery, state: FSMContext):
+    """Archive issue after closing it."""
+    data = await state.get_data()
+    project_id = data.get("archive_project_id")
+    issue_id = data.get("archive_issue_id")
+    seq_id = data.get("archive_seq_id", "?")
+
+    if not project_id or not issue_id:
+        await callback.message.edit_text("<b>✗ Нет данных для архивации</b>", parse_mode="HTML")
+        await callback.answer()
+        return
+
+    ok = await plane_service.archive_issue(project_id, issue_id)
+    if ok:
+        text = f"<b>✓ Задача #{seq_id} закрыта и архивирована</b>"
+    else:
+        text = f"<b>✓ Задача #{seq_id} закрыта</b>\n✗ Ошибка архивации"
+
+    await state.update_data(archive_project_id=None, archive_issue_id=None, archive_seq_id=None)
+    await state.set_state(PlaneAssistantStates.conversation)
+    await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "plane_act:skip_archive")
+async def on_skip_archive(callback: CallbackQuery, state: FSMContext):
+    """Skip archiving after close."""
+    seq_id = (await state.get_data()).get("archive_seq_id", "?")
+    await state.update_data(archive_project_id=None, archive_issue_id=None, archive_seq_id=None)
+    await state.set_state(PlaneAssistantStates.conversation)
+    await callback.message.edit_text(f"<b>✓ Задача #{seq_id} закрыта</b>", parse_mode="HTML")
     await callback.answer()
 
 
