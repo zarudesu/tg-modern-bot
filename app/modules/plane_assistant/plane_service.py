@@ -359,6 +359,28 @@ async def unassign_issue(project_id: str, issue_id: str) -> bool:
     return result is not None
 
 
+async def archive_issue(project_id: str, issue_id: str) -> bool:
+    """Archive an issue."""
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).isoformat()
+    result = await plane_api.update_issue(project_id, issue_id, archived_at=ts)
+    return result is not None
+
+
+async def set_description(project_id: str, issue_id: str, description: str) -> bool:
+    """Set or replace issue description."""
+    html = f"<p>{description}</p>" if description else ""
+    result = await plane_api.update_issue(project_id, issue_id, description_html=html)
+    return result is not None
+
+
+async def set_start_date(project_id: str, issue_id: str, start_date: str) -> bool:
+    """Set issue start date. start_date: 'YYYY-MM-DD' or '' to remove."""
+    value = start_date if start_date else None
+    result = await plane_api.update_issue(project_id, issue_id, start_date=value)
+    return result is not None
+
+
 async def find_issue_by_name(search_text: str, project_identifier: str = None) -> Optional[Tuple[str, str, dict]]:
     """Find issue by name substring (fuzzy match across projects).
 

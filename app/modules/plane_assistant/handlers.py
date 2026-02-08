@@ -64,12 +64,15 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so.
    {{"action": "update_status", "seq_id": 123, "status": "started"}}
    {{"action": "update_priority", "seq_id": 123, "priority": "high"}}
    {{"action": "set_deadline", "seq_id": 123, "target_date": "2026-02-15"}}
+   {{"action": "set_start_date", "seq_id": 123, "start_date": "2026-02-10"}}
    {{"action": "rename_issue", "seq_id": 123, "new_name": "Новое название"}}
+   {{"action": "set_description", "seq_id": 123, "description": "Подробное описание задачи"}}
+   {{"action": "archive_issue", "seq_id": 123}}
    {{"action": "create_task", "project": "HARZL", "name": "Название задачи", "priority": "high", "assignee": "Тимофей"}}
 6. СТАТУСЫ (status): "backlog", "unstarted", "started", "completed", "cancelled".
    "в работе" = "started", "бэклог" = "backlog", "сделано"/"закрой" = "completed".
 7. ПРИОРИТЕТЫ (priority): "urgent", "high", "medium", "low", "none".
-   set_deadline: "дедлайн завтра" → вычисли дату YYYY-MM-DD. "" = убрать дедлайн.
+   Даты: "дедлайн/начало завтра" → вычисли дату YYYY-MM-DD. "" = убрать.
 8. Работай ТОЛЬКО с реальными данными ниже.
 9. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
 10. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
@@ -169,6 +172,7 @@ def _classify_query(msg: str) -> str:
         'смени', 'статус', 'приоритет', 'в работе', 'в работу', 'бэклог',
         'дедлайн', 'срок', 'deadline', 'переименуй', 'rename',
         'сними', 'убери исполн', 'unassign',
+        'архив', 'archive', 'описание', 'description', 'начало', 'start_date',
     ]
     if any(kw in msg_lower for kw in action_kw):
         return "action"
@@ -357,7 +361,10 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext, s
                 "update_status": f"Меняю статус <b>#{seq}</b> → {action.get('status', '?')}",
                 "update_priority": f"Меняю приоритет <b>#{seq}</b> → {action.get('priority', '?')}",
                 "set_deadline": f"Дедлайн <b>#{seq}</b> → {action.get('target_date', '?')}",
+                "set_start_date": f"Начало <b>#{seq}</b> → {action.get('start_date', '?')}",
                 "rename_issue": f"Переименовываю <b>#{seq}</b>",
+                "set_description": f"Описание <b>#{seq}</b>",
+                "archive_issue": f"Архивирую <b>#{seq}</b>",
             }
             text = fallbacks.get(act, f"Выполняю действие с #{seq}")
 
@@ -789,7 +796,10 @@ async def _send_confirmation(status_msg: Message, text: str, action: dict):
         "update_status": f"Статус #{seq} → {action.get('status', '?')}",
         "update_priority": f"Приоритет #{seq} → {action.get('priority', '?')}",
         "set_deadline": f"Дедлайн #{seq} → {action.get('target_date', '?')}",
+        "set_start_date": f"Начало #{seq} → {action.get('start_date', '?')}",
         "rename_issue": f"Переименовать #{seq}",
+        "set_description": f"Описание #{seq}",
+        "archive_issue": f"Архивировать #{seq}",
         "create_task": f"Создать: {action.get('name', '?')[:30]}",
     }
     label = labels.get(act, act)
@@ -875,6 +885,26 @@ async def on_confirm(callback: CallbackQuery, state: FSMContext):
             elif action_name == "unassign_issue":
                 ok = await plane_service.unassign_issue(project_id, issue["id"])
                 result_text = f"✓ #{seq_id} исполнитель снят" if ok else f"✗ Ошибка"
+
+            elif action_name == "archive_issue":
+                ok = await plane_service.archive_issue(project_id, issue["id"])
+                result_text = f"✓ #{seq_id} архивирована" if ok else f"✗ Ошибка архивации"
+
+            elif action_name == "set_description":
+                desc = action.get("description", "")
+                if not desc:
+                    result_text = "✗ Не указано описание"
+                else:
+                    ok = await plane_service.set_description(project_id, issue["id"], desc)
+                    result_text = f"✓ #{seq_id} описание обновлено" if ok else f"✗ Ошибка"
+
+            elif action_name == "set_start_date":
+                start = action.get("start_date", "")
+                ok = await plane_service.set_start_date(project_id, issue["id"], start)
+                if ok:
+                    result_text = f"✓ #{seq_id} начало → {start}" if start else f"✓ #{seq_id} дата начала убрана"
+                else:
+                    result_text = f"✗ Ошибка установки даты начала"
 
             else:
                 result_text = f"✗ Действие '{action_name}' не поддерживается"
