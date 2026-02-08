@@ -704,56 +704,76 @@ async def _handle_create_task_from_draft(draft: dict) -> str:
     name = draft.get("name", "")
     priority = draft.get("priority", "none")
     assignee_name = draft.get("assignee")
-    target_date = draft.get("target_date")
+    target_date = draft.get("target_date") or None
     description = draft.get("description", "")
 
     if not project_ident or not name:
         return "✗ Не указан проект или название задачи"
 
-    # Find project
-    projects = await plane_api.get_all_projects()
-    project = None
-    ident_upper = project_ident.upper()
-    for p in (projects or []):
-        if ident_upper in (p.get('identifier', '').upper(), p.get('name', '').upper()):
-            project = p
-            break
-    if not project:
-        for p in (projects or []):
-            if ident_upper in p.get('name', '').upper() or ident_upper in p.get('identifier', '').upper():
-                project = p
-                break
-    if not project:
-        return f"✗ Проект '{project_ident}' не найден"
+    try:
+        # Find project
+        projects = await plane_api.get_all_projects()
+        if not projects:
+            return "✗ Не удалось загрузить проекты из Plane"
 
-    pid = project['id']
+        project = _find_project(projects, project_ident)
+        if not project:
+            avail = ", ".join(p.get('identifier', '?') for p in projects[:10])
+            return f"✗ Проект '{project_ident}' не найден. Есть: {avail}"
 
-    # Resolve assignee
-    assignee_ids = []
-    if assignee_name:
-        members = await plane_api.get_workspace_members()
-        for m in (members or []):
-            mname = m.display_name if hasattr(m, 'display_name') else m.get('display_name', '')
-            first = m.first_name if hasattr(m, 'first_name') else m.get('first_name', '')
-            if assignee_name.lower() in f"{first} {mname}".lower():
-                mid = m.id if hasattr(m, 'id') else m.get('id')
-                assignee_ids = [mid]
-                break
-
-    result = await plane_api.create_issue(
-        project_id=pid,
-        name=name,
-        priority=priority,
-        assignees=assignee_ids or None,
-        description=description,
-        target_date=target_date,
-    )
-
-    if result:
-        seq = result.get('sequence_id', '?')
+        pid = project['id']
         pname = project.get('identifier', '?')
-        return f"✓ Создана {pname}-{seq}: {name}"
-    return "✗ Ошибка при создании задачи"
+
+        # Resolve assignee
+        assignee_ids = _resolve_assignee_ids(assignee_name, await plane_api.get_workspace_members()) if assignee_name else []
+
+        bot_logger.info(f"Creating task: project={pname}, name='{name[:50]}', prio={priority}, assignees={assignee_ids}, deadline={target_date}")
+
+        result = await plane_api.create_issue(
+            project_id=pid,
+            name=name,
+            priority=priority,
+            assignees=assignee_ids or None,
+            description=description,
+            target_date=target_date,
+        )
+
+        if result:
+            seq = result.get('sequence_id', '?')
+            return f"✓ Создана {pname}-{seq}: {name}"
+        return f"✗ Plane API вернул ошибку. Проект={pname}, имя='{name[:40]}'"
+
+    except Exception as e:
+        bot_logger.error(f"_handle_create_task_from_draft error: {e}", exc_info=True)
+        return f"✗ Ошибка: {str(e)[:100]}"
+
+
+def _find_project(projects: list, ident: str) -> dict | None:
+    """Find project by identifier/name (exact then substring)."""
+    ident_upper = ident.upper()
+    # Exact match on identifier or name
+    for p in projects:
+        if ident_upper in (p.get('identifier', '').upper(), p.get('name', '').upper()):
+            return p
+    # Substring match
+    for p in projects:
+        if ident_upper in p.get('name', '').upper() or ident_upper in p.get('identifier', '').upper():
+            return p
+    return None
+
+
+def _resolve_assignee_ids(assignee_name: str, members: list) -> list:
+    """Resolve assignee name to list of member UUIDs."""
+    if not assignee_name or not members:
+        return []
+    query = assignee_name.lower()
+    for m in members:
+        mname = m.display_name if hasattr(m, 'display_name') else m.get('display_name', '')
+        first = m.first_name if hasattr(m, 'first_name') else m.get('first_name', '')
+        if query in f"{first} {mname}".lower():
+            mid = m.id if hasattr(m, 'id') else m.get('id')
+            return [mid]
+    return []
 
 
 async def _send_confirmation(status_msg: Message, text: str, action: dict):
@@ -868,7 +888,7 @@ async def on_confirm(callback: CallbackQuery, state: FSMContext):
 
 
 async def _handle_create_task(action: dict) -> str:
-    """Create a new task in Plane."""
+    """Create a new task in Plane (legacy confirm path)."""
     project_ident = action.get("project", "")
     name = action.get("name", "")
     priority = action.get("priority", "none")
@@ -877,51 +897,37 @@ async def _handle_create_task(action: dict) -> str:
     if not project_ident or not name:
         return "✗ Не указан проект или название задачи"
 
-    # Find project
-    projects = await plane_api.get_all_projects()
-    project = None
-    ident_upper = project_ident.upper()
-    for p in (projects or []):
-        if ident_upper in (p.get('identifier', '').upper(), p.get('name', '').upper()):
-            project = p
-            break
+    try:
+        projects = await plane_api.get_all_projects()
+        if not projects:
+            return "✗ Не удалось загрузить проекты из Plane"
 
-    if not project:
-        # Try fuzzy
-        for p in (projects or []):
-            if ident_upper in p.get('name', '').upper() or ident_upper in p.get('identifier', '').upper():
-                project = p
-                break
+        project = _find_project(projects, project_ident)
+        if not project:
+            avail = ", ".join(p.get('identifier', '?') for p in projects[:10])
+            return f"✗ Проект '{project_ident}' не найден. Есть: {avail}"
 
-    if not project:
-        return f"✗ Проект '{project_ident}' не найден"
-
-    pid = project['id']
-
-    # Resolve assignee
-    assignee_ids = []
-    if assignee_name:
-        members = await plane_api.get_workspace_members()
-        for m in (members or []):
-            mname = m.display_name if hasattr(m, 'display_name') else m.get('display_name', '')
-            first = m.first_name if hasattr(m, 'first_name') else m.get('first_name', '')
-            if assignee_name.lower() in f"{first} {mname}".lower():
-                mid = m.id if hasattr(m, 'id') else m.get('id')
-                assignee_ids = [mid]
-                break
-
-    result = await plane_api.create_issue(
-        project_id=pid,
-        name=name,
-        priority=priority,
-        assignees=assignee_ids or None,
-    )
-
-    if result:
-        seq = result.get('sequence_id', '?')
+        pid = project['id']
         pname = project.get('identifier', '?')
-        return f"✓ Создана {pname}-{seq}: {name}"
-    return "✗ Ошибка при создании задачи"
+        assignee_ids = _resolve_assignee_ids(assignee_name, await plane_api.get_workspace_members()) if assignee_name else []
+
+        bot_logger.info(f"Creating task (confirm): project={pname}, name='{name[:50]}', prio={priority}")
+
+        result = await plane_api.create_issue(
+            project_id=pid,
+            name=name,
+            priority=priority,
+            assignees=assignee_ids or None,
+        )
+
+        if result:
+            seq = result.get('sequence_id', '?')
+            return f"✓ Создана {pname}-{seq}: {name}"
+        return f"✗ Plane API вернул ошибку. Проект={pname}, имя='{name[:40]}'"
+
+    except Exception as e:
+        bot_logger.error(f"_handle_create_task error: {e}", exc_info=True)
+        return f"✗ Ошибка: {str(e)[:100]}"
 
 
 @router.callback_query(F.data == "plane_act:cancel")
