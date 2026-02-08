@@ -30,6 +30,9 @@ class DailyTasksScheduler:
         self._last_plane_analysis_date = None
         self.weekly_audit_task: Optional[asyncio.Task] = None
         self._last_weekly_audit_date = None
+        self.reconciliation_task: Optional[asyncio.Task] = None
+        self.reconciliation_hour = 18  # 18:00 MSK
+        self._last_reconciliation_date = None
     
     async def start(self):
         """Запустить планировщик"""
@@ -44,7 +47,8 @@ class DailyTasksScheduler:
         self.reminder_task = asyncio.create_task(self._reminders_loop())
         self.plane_analysis_task = asyncio.create_task(self._plane_analysis_loop())
         self.weekly_audit_task = asyncio.create_task(self._weekly_audit_loop())
-        bot_logger.info("Daily tasks scheduler, reminders, plane analysis and weekly audit started")
+        self.reconciliation_task = asyncio.create_task(self._reconciliation_loop())
+        bot_logger.info("Daily tasks scheduler, reminders, plane analysis, weekly audit and reconciliation started")
     
     async def stop(self):
         """Остановить планировщик"""
@@ -84,6 +88,13 @@ class DailyTasksScheduler:
             self.weekly_audit_task.cancel()
             try:
                 await self.weekly_audit_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.reconciliation_task:
+            self.reconciliation_task.cancel()
+            try:
+                await self.reconciliation_task
             except asyncio.CancelledError:
                 pass
 
@@ -501,6 +512,79 @@ class DailyTasksScheduler:
 
         except Exception as e:
             bot_logger.error(f"Error in weekly audit: {e}")
+
+    async def _reconciliation_loop(self):
+        """Daily chat reconciliation at 18:00 MSK."""
+        tz = pytz.timezone(settings.daily_tasks_timezone)
+
+        while self.running:
+            try:
+                now = datetime.now(tz)
+                today = now.date()
+
+                if (
+                    now.hour == self.reconciliation_hour
+                    and self._last_reconciliation_date != today
+                ):
+                    self._last_reconciliation_date = today
+                    await self._run_reconciliation()
+
+                await asyncio.sleep(60)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                bot_logger.error(f"Error in reconciliation loop: {e}")
+                await asyncio.sleep(300)
+
+    async def _run_reconciliation(self):
+        """Run daily chat reconciliation and send summary to admins."""
+        from ..modules.reconciliation.reconciliation_service import (
+            ReconciliationService,
+            serialize_item,
+        )
+
+        try:
+            service = ReconciliationService()
+            items = await service.run()
+
+            if not items:
+                bot_logger.info("Scheduled reconciliation: no incidents found")
+                return
+
+            serialized = [serialize_item(i) for i in items]
+
+            # Format summary
+            from ..modules.reconciliation.router import _format_summary
+            summary = _format_summary(serialized)
+            if len(summary) > 4000:
+                summary = summary[:3950] + "\n\n<i>...обрезано</i>"
+
+            summary += "\n\n<i>Запустите /plane_reconcile для действий</i>"
+
+            # Send to admins
+            from aiogram import Bot
+            bot = Bot(token=settings.telegram_token)
+            try:
+                for admin_id in settings.admin_user_id_list:
+                    try:
+                        await bot.send_message(
+                            chat_id=admin_id,
+                            text=summary,
+                            parse_mode="HTML",
+                        )
+                    except Exception as e:
+                        bot_logger.warning(
+                            f"Failed to send reconciliation to admin {admin_id}: {e}"
+                        )
+                bot_logger.info(
+                    f"Scheduled reconciliation sent: {len(items)} incidents"
+                )
+            finally:
+                await bot.session.close()
+
+        except Exception as e:
+            bot_logger.error(f"Error in scheduled reconciliation: {e}")
 
     def is_running(self) -> bool:
         """Проверить, запущен ли планировщик"""

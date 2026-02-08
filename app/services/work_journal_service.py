@@ -164,6 +164,59 @@ class WorkJournalService:
         
         return entry
     
+    async def create_entry_quick(
+        self,
+        telegram_user_id: int,
+        work_date: date,
+        company: str,
+        work_description: str,
+        work_duration: str = "30 мин",
+        is_travel: bool = False,
+        worker_names: Optional[List[str]] = None,
+    ) -> WorkJournalEntry:
+        """Create a work journal entry programmatically (no FSM flow).
+
+        Looks up user email from BotUser, defaults workers to all active.
+        """
+        import json
+
+        # Get user info
+        result = await self.session.execute(
+            select(BotUser).where(BotUser.telegram_user_id == telegram_user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user and user.username:
+            user_email = f"{user.username}@example.com"
+        else:
+            user_email = f"user_{telegram_user_id}@telegram.bot"
+        user_name = user.first_name if user else str(telegram_user_id)
+
+        # Default workers: all active
+        if worker_names is None:
+            worker_names = await self.get_workers(active_only=True)
+
+        entry = WorkJournalEntry(
+            telegram_user_id=telegram_user_id,
+            user_email=user_email,
+            work_date=work_date,
+            company=company,
+            work_duration=work_duration,
+            work_description=work_description,
+            is_travel=is_travel,
+            worker_names=json.dumps(worker_names, ensure_ascii=False),
+            created_by_user_id=telegram_user_id,
+            created_by_name=user_name,
+            n8n_sync_status=N8nSyncStatus.PENDING.value,
+        )
+
+        self.session.add(entry)
+        await self.session.commit()
+
+        bot_logger.info(
+            f"Quick-created work journal entry {entry.id} for user {telegram_user_id}"
+        )
+        return entry
+
     async def get_work_entries(
         self,
         telegram_user_id: Optional[int] = None,

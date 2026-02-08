@@ -74,10 +74,11 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so.
    "закрой" / "выполнено" / "done" → используй close_issue, НЕ update_status!
 7. ПРИОРИТЕТЫ (priority): "urgent", "high", "medium", "low", "none".
    Даты: "дедлайн/начало завтра" → вычисли дату YYYY-MM-DD. "" = убрать.
-8. Работай ТОЛЬКО с реальными данными ниже.
-9. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
-10. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
-11. Если пользователь указывает задачу ПО ИМЕНИ (без #номера), найди её в данных и используй seq_id.
+8. НИКОГДА не возвращай JSON с "is_task", "confidence", "task_description" — это чужой формат. Используй ТОЛЬКО действия выше или обычный текст.
+9. Работай ТОЛЬКО с реальными данными ниже.
+10. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
+11. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
+12. Если пользователь указывает задачу ПО ИМЕНИ (без #номера), найди её в данных и используй seq_id.
     ВСЕГДА указывай seq_id в JSON — это ОБЯЗАТЕЛЬНОЕ поле.
 
 КОНТЕКСТ WORKSPACE:
@@ -161,6 +162,22 @@ def _extract_action(ai_text: str) -> tuple:
     # Final cleanup: remove any leftover JSON-like blocks that AI might have emitted
     cleaned = re.sub(r'```json\s*\{.*?\}\s*```', '', ai_text, flags=re.DOTALL).strip()
     cleaned = re.sub(r'```\s*\{.*?\}\s*```', '', cleaned, flags=re.DOTALL).strip()
+
+    # Strip stray JSON objects without "action" key (e.g. AI returned is_task format)
+    cleaned = re.sub(r'\{[^{}]*"is_task"\s*:[^{}]*\}', '', cleaned).strip()
+
+    # If the entire response is a JSON object (no surrounding text), it's garbage — replace
+    if cleaned.startswith('{') and cleaned.endswith('}') and '"action"' not in cleaned:
+        try:
+            obj = json.loads(cleaned)
+            # AI returned wrong format — extract any useful text
+            desc = obj.get("task_description") or obj.get("description") or ""
+            if desc:
+                cleaned = desc
+            else:
+                cleaned = "AI вернул некорректный формат. Попробуйте переформулировать."
+        except json.JSONDecodeError:
+            pass
 
     return cleaned, None
 

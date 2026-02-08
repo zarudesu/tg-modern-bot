@@ -372,6 +372,11 @@ async def main():
         dp.include_router(plane_assistant_router)
         bot_logger.info("✅ Plane Assistant module loaded")
 
+        # 7.65. Reconciliation - /plane_reconcile command (daily chat reconciliation)
+        from .modules.reconciliation.router import router as reconciliation_router
+        dp.include_router(reconciliation_router)
+        bot_logger.info("✅ Reconciliation module loaded")
+
         # 7.7. AI Training Export - /ai_export command
         from .handlers.ai_training_export import router as ai_export_router
         dp.include_router(ai_export_router)

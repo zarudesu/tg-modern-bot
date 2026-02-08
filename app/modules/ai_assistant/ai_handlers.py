@@ -45,6 +45,10 @@ class AutoTaskDetectionHandler(EventHandler):
         if not text or len(text) < 10:  # Игнорируем короткие сообщения
             return
 
+        # Skip bot commands — they are handled by dedicated routers
+        if text.startswith("/"):
+            return
+
         # Проверяем ключевые слова которые могут указывать на задачу
         task_keywords = ["нужно", "надо", "сделать", "создать", "добавить", "исправить", "fix", "todo"]
 
