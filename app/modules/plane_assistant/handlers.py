@@ -56,16 +56,20 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so.
 2. Выделяй ГЛАВНОЕ: "у тебя X срочных, Y просроченных, начни с Z".
 3. Будь человечным, не формальным.
 4. ОБЯЗАТЕЛЬНО используй <b>жирный</b> для важного, <i>курсив</i> для пояснений.
-5. Для действий — СНАЧАЛА текст, ПОТОМ один JSON-блок:
+5. Для действий — СНАЧАЛА текст, ПОТОМ один JSON-блок. ДОСТУПНЫЕ ДЕЙСТВИЯ:
    {{"action": "close_issue", "seq_id": 123, "comment": "optional"}}
    {{"action": "assign_issue", "seq_id": 123, "assignee": "Тимофей"}}
+   {{"action": "unassign_issue", "seq_id": 123}}
    {{"action": "comment_issue", "seq_id": 123, "comment": "текст"}}
    {{"action": "update_status", "seq_id": 123, "status": "started"}}
    {{"action": "update_priority", "seq_id": 123, "priority": "high"}}
+   {{"action": "set_deadline", "seq_id": 123, "target_date": "2026-02-15"}}
+   {{"action": "rename_issue", "seq_id": 123, "new_name": "Новое название"}}
    {{"action": "create_task", "project": "HARZL", "name": "Название задачи", "priority": "high", "assignee": "Тимофей"}}
 6. СТАТУСЫ (status): "backlog", "unstarted", "started", "completed", "cancelled".
    "в работе" = "started", "бэклог" = "backlog", "сделано"/"закрой" = "completed".
 7. ПРИОРИТЕТЫ (priority): "urgent", "high", "medium", "low", "none".
+   set_deadline: "дедлайн завтра" → вычисли дату YYYY-MM-DD. "" = убрать дедлайн.
 8. Работай ТОЛЬКО с реальными данными ниже.
 9. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
 10. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
@@ -163,6 +167,8 @@ def _classify_query(msg: str) -> str:
     action_kw = [
         'закрой', 'назначь', 'коммент', 'создай', 'удали', 'close', 'assign',
         'смени', 'статус', 'приоритет', 'в работе', 'в работу', 'бэклог',
+        'дедлайн', 'срок', 'deadline', 'переименуй', 'rename',
+        'сними', 'убери исполн', 'unassign',
     ]
     if any(kw in msg_lower for kw in action_kw):
         return "action"
@@ -346,9 +352,12 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext, s
             fallbacks = {
                 "close_issue": f"Закрываю задачу <b>#{seq}</b>",
                 "assign_issue": f"Назначаю <b>#{seq}</b> на {action.get('assignee', '?')}",
+                "unassign_issue": f"Снимаю исполнителя с <b>#{seq}</b>",
                 "comment_issue": f"Добавляю комментарий к <b>#{seq}</b>",
                 "update_status": f"Меняю статус <b>#{seq}</b> → {action.get('status', '?')}",
                 "update_priority": f"Меняю приоритет <b>#{seq}</b> → {action.get('priority', '?')}",
+                "set_deadline": f"Дедлайн <b>#{seq}</b> → {action.get('target_date', '?')}",
+                "rename_issue": f"Переименовываю <b>#{seq}</b>",
             }
             text = fallbacks.get(act, f"Выполняю действие с #{seq}")
 
@@ -755,9 +764,12 @@ async def _send_confirmation(status_msg: Message, text: str, action: dict):
     labels = {
         "close_issue": f"Закрыть #{seq}",
         "assign_issue": f"Назначить #{seq} → {action.get('assignee', '?')}",
+        "unassign_issue": f"Снять исполнителя #{seq}",
         "comment_issue": f"Коммент к #{seq}",
         "update_status": f"Статус #{seq} → {action.get('status', '?')}",
         "update_priority": f"Приоритет #{seq} → {action.get('priority', '?')}",
+        "set_deadline": f"Дедлайн #{seq} → {action.get('target_date', '?')}",
+        "rename_issue": f"Переименовать #{seq}",
         "create_task": f"Создать: {action.get('name', '?')[:30]}",
     }
     label = labels.get(act, act)
@@ -823,6 +835,32 @@ async def on_confirm(callback: CallbackQuery, state: FSMContext):
                 ok = await plane_service.change_priority(project_id, issue["id"], prio)
                 prio_label = PRIORITY_LABELS.get(prio, prio)
                 result_text = f"✓ #{seq_id} приоритет → {prio_label}" if ok else f"✗ Ошибка смены приоритета"
+
+            elif action_name == "set_deadline":
+                target = action.get("target_date", "")
+                ok = await plane_service.set_deadline(project_id, issue["id"], target)
+                if ok:
+                    result_text = f"✓ #{seq_id} дедлайн → {target}" if target else f"✓ #{seq_id} дедлайн убран"
+                else:
+                    result_text = f"✗ Ошибка установки дедлайна"
+
+            elif action_name == "rename_issue":
+                new_name = action.get("new_name", "")
+                if not new_name:
+                    result_text = "✗ Не указано новое название"
+                else:
+                    ok = await plane_service.rename_issue(project_id, issue["id"], new_name)
+                    result_text = f"✓ #{seq_id} → {new_name}" if ok else f"✗ Ошибка переименования"
+
+            elif action_name == "unassign_issue":
+                ok = await plane_service.unassign_issue(project_id, issue["id"])
+                result_text = f"✓ #{seq_id} исполнитель снят" if ok else f"✗ Ошибка"
+
+            else:
+                result_text = f"✗ Действие '{action_name}' не поддерживается"
+    else:
+        if not seq_id and action_name != "create_task":
+            result_text = f"✗ AI не указал номер задачи (seq_id). Уточни запрос, например: #123"
 
     await callback.message.edit_text(f"<b>{result_text}</b>", parse_mode="HTML")
     await state.set_state(PlaneAssistantStates.conversation)

@@ -340,6 +340,25 @@ async def change_priority(project_id: str, issue_id: str, priority: str) -> bool
     return result is not None
 
 
+async def set_deadline(project_id: str, issue_id: str, target_date: str) -> bool:
+    """Set or change issue deadline. target_date: 'YYYY-MM-DD' or '' to remove."""
+    value = target_date if target_date else None
+    result = await plane_api.update_issue(project_id, issue_id, target_date=value)
+    return result is not None
+
+
+async def rename_issue(project_id: str, issue_id: str, new_name: str) -> bool:
+    """Rename an issue."""
+    result = await plane_api.update_issue(project_id, issue_id, name=new_name)
+    return result is not None
+
+
+async def unassign_issue(project_id: str, issue_id: str) -> bool:
+    """Remove all assignees from an issue."""
+    result = await plane_api.update_issue(project_id, issue_id, assignees=[])
+    return result is not None
+
+
 async def find_issue_by_name(search_text: str, project_identifier: str = None) -> Optional[Tuple[str, str, dict]]:
     """Find issue by name substring (fuzzy match across projects).
 
