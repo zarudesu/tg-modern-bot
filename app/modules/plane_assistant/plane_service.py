@@ -313,6 +313,78 @@ async def assign_issue(project_id: str, issue_id: str, assignee_name: str) -> Op
     return display if result else None
 
 
+async def change_status(project_id: str, issue_id: str, target_group: str) -> Optional[str]:
+    """Change issue state by group name.
+
+    target_group: 'backlog' | 'unstarted' | 'started' | 'completed' | 'cancelled'
+    Returns the new state name or None on failure.
+    """
+    states = await plane_api.get_project_states(project_id)
+    new_state = None
+    for s in states:
+        if s.get('group') == target_group:
+            new_state = s
+            break
+
+    if not new_state:
+        bot_logger.warning(f"No '{target_group}' state found for project {project_id}")
+        return None
+
+    result = await plane_api.update_issue(project_id, issue_id, state=new_state['id'])
+    return new_state.get('name') if result else None
+
+
+async def change_priority(project_id: str, issue_id: str, priority: str) -> bool:
+    """Change issue priority. priority: 'urgent'|'high'|'medium'|'low'|'none'."""
+    result = await plane_api.update_issue(project_id, issue_id, priority=priority)
+    return result is not None
+
+
+async def find_issue_by_name(search_text: str, project_identifier: str = None) -> Optional[Tuple[str, str, dict]]:
+    """Find issue by name substring (fuzzy match across projects).
+
+    Returns (project_id, project_identifier, issue_data) or None.
+    """
+    projects = await plane_api.get_all_projects()
+    if not projects:
+        return None
+
+    # If project specified, filter to it
+    if project_identifier:
+        ident = project_identifier.upper()
+        projects = [p for p in projects if ident in (
+            p.get('identifier', '').upper(), p.get('name', '').upper()
+        )]
+
+    query = search_text.lower()
+
+    for p in projects:
+        pid = p['id']
+        pident = p.get('identifier', '?')
+        try:
+            async with aiohttp.ClientSession() as session:
+                tasks = await plane_api._tasks_manager._get_project_issues(
+                    session, pid, assigned_only=False
+                )
+                for t in tasks:
+                    if query in t.name.lower():
+                        issue_data = {
+                            "id": t.id,
+                            "name": t.name,
+                            "state": t.get_state_name(),
+                            "priority": t.priority,
+                            "assignee": t.assignee_name,
+                            "target_date": t.target_date,
+                            "project_name": pident,
+                            "sequence_id": t.sequence_id,
+                        }
+                        return pid, pident, issue_data
+        except Exception:
+            continue
+
+    return None
+
+
 async def add_comment(project_id: str, issue_id: str, comment_text: str) -> bool:
     """Add comment to an issue."""
     result = await plane_api.create_issue_comment(project_id, issue_id, comment_text)

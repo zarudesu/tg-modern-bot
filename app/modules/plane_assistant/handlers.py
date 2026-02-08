@@ -60,10 +60,17 @@ SYSTEM_PROMPT = """Ты — AI-ассистент для задач в Plane.so.
    {{"action": "close_issue", "seq_id": 123, "comment": "optional"}}
    {{"action": "assign_issue", "seq_id": 123, "assignee": "Тимофей"}}
    {{"action": "comment_issue", "seq_id": 123, "comment": "текст"}}
+   {{"action": "update_status", "seq_id": 123, "status": "started"}}
+   {{"action": "update_priority", "seq_id": 123, "priority": "high"}}
    {{"action": "create_task", "project": "HARZL", "name": "Название задачи", "priority": "high", "assignee": "Тимофей"}}
-6. Работай ТОЛЬКО с реальными данными ниже.
-7. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
-8. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
+6. СТАТУСЫ (status): "backlog", "unstarted", "started", "completed", "cancelled".
+   "в работе" = "started", "бэклог" = "backlog", "сделано"/"закрой" = "completed".
+7. ПРИОРИТЕТЫ (priority): "urgent", "high", "medium", "low", "none".
+8. Работай ТОЛЬКО с реальными данными ниже.
+9. "Чем заняться" → TOP-3 задачи + ПОЧЕМУ именно они.
+10. Задачи старше 3 месяцев без обновлений — предложи закрыть или переназначить.
+11. Если пользователь указывает задачу ПО ИМЕНИ (без #номера), найди её в данных и используй seq_id.
+    ВСЕГДА указывай seq_id в JSON — это ОБЯЗАТЕЛЬНОЕ поле.
 
 КОНТЕКСТ WORKSPACE:
 {workspace_context}
@@ -153,8 +160,11 @@ def _extract_action(ai_text: str) -> tuple:
 def _classify_query(msg: str) -> str:
     """Classify query complexity: 'action' (simple) or 'analysis' (needs smart model)."""
     msg_lower = msg.lower()
-    action_kw = ['закрой', 'назначь', 'коммент', 'создай', 'удали', 'close', 'assign']
-    if re.search(r'#\d+', msg) and any(kw in msg_lower for kw in action_kw):
+    action_kw = [
+        'закрой', 'назначь', 'коммент', 'создай', 'удали', 'close', 'assign',
+        'смени', 'статус', 'приоритет', 'в работе', 'в работу', 'бэклог',
+    ]
+    if any(kw in msg_lower for kw in action_kw):
         return "action"
     return "analysis"
 
@@ -231,7 +241,8 @@ async def _gather_plane_data(user_message: str, user_email: str) -> str:
     kw_overdue = ['просроч', 'проебал', 'забыл', 'пропустил', 'overdue', 'stale', 'завис', 'горит']
     kw_project = ['проект', 'project', 'что по']
     kw_workload = ['нагрузк', 'workload', 'команд', 'кто чем', 'кто занят']
-    kw_status = ['статус', 'status', 'обзор', 'сводк', 'итог']
+    kw_status = ['обзор', 'сводк', 'итог']
+    kw_mutation = ['смени', 'поменяй', 'измени', 'переведи', 'статус', 'в работе', 'в работу']
 
     if any(kw in msg_lower for kw in kw_tasks) or not data_parts:
         data_parts.append(await plane_service.get_my_tasks_summary(user_email))
@@ -244,6 +255,14 @@ async def _gather_plane_data(user_message: str, user_email: str) -> str:
 
     # Fuzzy project matching
     if any(kw in msg_lower for kw in kw_project) or any(alias in msg_lower for alias in PROJECT_ALIASES):
+        project_id = _fuzzy_match_project(user_message)
+        if project_id:
+            result = await plane_service.get_project_tasks_summary(project_id)
+            if 'не найден' not in result:
+                data_parts.append(result)
+
+    # Status mutation request — load project tasks for the mentioned project
+    if any(kw in msg_lower for kw in kw_mutation):
         project_id = _fuzzy_match_project(user_message)
         if project_id:
             result = await plane_service.get_project_tasks_summary(project_id)
@@ -328,6 +347,8 @@ async def _process_message(user_message: str, user_id: int, state: FSMContext, s
                 "close_issue": f"Закрываю задачу <b>#{seq}</b>",
                 "assign_issue": f"Назначаю <b>#{seq}</b> на {action.get('assignee', '?')}",
                 "comment_issue": f"Добавляю комментарий к <b>#{seq}</b>",
+                "update_status": f"Меняю статус <b>#{seq}</b> → {action.get('status', '?')}",
+                "update_priority": f"Меняю приоритет <b>#{seq}</b> → {action.get('priority', '?')}",
             }
             text = fallbacks.get(act, f"Выполняю действие с #{seq}")
 
@@ -735,6 +756,8 @@ async def _send_confirmation(status_msg: Message, text: str, action: dict):
         "close_issue": f"Закрыть #{seq}",
         "assign_issue": f"Назначить #{seq} → {action.get('assignee', '?')}",
         "comment_issue": f"Коммент к #{seq}",
+        "update_status": f"Статус #{seq} → {action.get('status', '?')}",
+        "update_priority": f"Приоритет #{seq} → {action.get('priority', '?')}",
         "create_task": f"Создать: {action.get('name', '?')[:30]}",
     }
     label = labels.get(act, act)
@@ -789,6 +812,17 @@ async def on_confirm(callback: CallbackQuery, state: FSMContext):
                 comment = action.get("comment", "")
                 ok = await plane_service.add_comment(project_id, issue["id"], comment)
                 result_text = f"✓ Комментарий к #{seq_id} добавлен" if ok else f"✗ Ошибка"
+
+            elif action_name == "update_status":
+                target_group = action.get("status", "")
+                new_name = await plane_service.change_status(project_id, issue["id"], target_group)
+                result_text = f"✓ #{seq_id} → {new_name}" if new_name else f"✗ Статус '{target_group}' не найден"
+
+            elif action_name == "update_priority":
+                prio = action.get("priority", "medium")
+                ok = await plane_service.change_priority(project_id, issue["id"], prio)
+                prio_label = PRIORITY_LABELS.get(prio, prio)
+                result_text = f"✓ #{seq_id} приоритет → {prio_label}" if ok else f"✗ Ошибка смены приоритета"
 
     await callback.message.edit_text(f"<b>{result_text}</b>", parse_mode="HTML")
     await state.set_state(PlaneAssistantStates.conversation)
