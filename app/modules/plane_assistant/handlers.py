@@ -163,21 +163,23 @@ def _extract_action(ai_text: str) -> tuple:
     cleaned = re.sub(r'```json\s*\{.*?\}\s*```', '', ai_text, flags=re.DOTALL).strip()
     cleaned = re.sub(r'```\s*\{.*?\}\s*```', '', cleaned, flags=re.DOTALL).strip()
 
-    # Strip stray JSON objects without "action" key (e.g. AI returned is_task format)
-    cleaned = re.sub(r'\{[^{}]*"is_task"\s*:[^{}]*\}', '', cleaned).strip()
-
-    # If the entire response is a JSON object (no surrounding text), it's garbage — replace
+    # If the entire response is a JSON object without "action" key — wrong format
     if cleaned.startswith('{') and cleaned.endswith('}') and '"action"' not in cleaned:
         try:
             obj = json.loads(cleaned)
-            # AI returned wrong format — extract any useful text
             desc = obj.get("task_description") or obj.get("description") or ""
             if desc:
                 cleaned = desc
             else:
-                cleaned = "AI вернул некорректный формат. Попробуйте переформулировать."
+                cleaned = ""
         except json.JSONDecodeError:
             pass
+
+    # Strip remaining stray is_task JSON fragments from mixed text
+    cleaned = re.sub(r'\{[^{}]*"is_task"\s*:[^{}]*\}', '', cleaned).strip()
+
+    if not cleaned:
+        cleaned = "Не удалось обработать запрос. Попробуйте переформулировать."
 
     return cleaned, None
 
