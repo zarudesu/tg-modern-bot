@@ -62,7 +62,8 @@ DEFAULT_DURATIONS: List[str] = [
 DEFAULT_WORKERS: List[str] = [
     "Тимофей",
     "Дима",
-    "Костя"
+    "Костя",
+    "Ярослав"
 ]
 
 # Настройки для callback data

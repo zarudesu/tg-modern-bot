@@ -26,6 +26,7 @@ TELEGRAM_TO_DISPLAY_NAME = {
     "zardes": "Костя",
     "dima_gusev": "Дима",
     "timofey_batyrev": "Тимофей",
+    "cernezvratky": "Ярослав",
 }
 
 # For group messages: telegram_username → @handle
@@ -34,6 +35,7 @@ TELEGRAM_TO_HANDLE = {
     "zardes": "@zardes",
     "dima_gusev": "@gendir_hhivp",
     "timofey_batyrev": "@spiritphoto",
+    "cernezvratky": "@cernezvratky",
 }
 
 
