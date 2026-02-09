@@ -9,6 +9,7 @@ from .openai_provider import OpenAIProvider
 from .anthropic_provider import AnthropicProvider
 from .openrouter_provider import OpenRouterProvider, FREE_MODELS, RECOMMENDED_MODELS
 from .groq_provider import GroqProvider, GROQ_MODELS
+from .gemini_provider import GeminiProvider, GEMINI_MODELS
 from ...utils.logger import bot_logger
 
 
@@ -18,6 +19,7 @@ class AIProviderType(Enum):
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
     GROQ = "groq"
+    GEMINI = "gemini"
     CUSTOM = "custom"
 
 
@@ -190,6 +192,40 @@ class AIManager:
 
         self.register_provider(name, provider, set_as_default)
         return provider
+
+    def create_gemini_provider(
+        self,
+        api_key: str,
+        model: str = "gemini-2.0-flash",
+        name: str = "gemini",
+        set_as_default: bool = False,
+        **config_kwargs
+    ) -> GeminiProvider:
+        """
+        Создать и зарегистрировать Google Gemini провайдер
+
+        Gemini — большой контекст (до 1M токенов), бесплатный tier.
+
+        Args:
+            api_key: Google AI Studio API ключ
+            model: Модель (gemini-2.0-flash, gemini-1.5-pro, etc)
+            name: Имя провайдера
+            set_as_default: Установить как default
+            **config_kwargs: Дополнительные параметры конфигурации
+
+        Returns:
+            Созданный Gemini провайдер
+        """
+        config = AIConfig(model=model, **config_kwargs)
+        provider = GeminiProvider(api_key=api_key, config=config)
+
+        self.register_provider(name, provider, set_as_default)
+        return provider
+
+    @staticmethod
+    def get_gemini_models() -> list:
+        """Получить список моделей Gemini"""
+        return GEMINI_MODELS.copy()
 
     @staticmethod
     def get_groq_models() -> list:

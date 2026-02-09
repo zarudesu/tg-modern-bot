@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None  # OpenRouter для бесплатных моделей
     groq_api_key: Optional[str] = None  # Groq для транскрипции Whisper (платный)
+    gemini_api_key: Optional[str] = None  # Google Gemini (AI Studio), большой контекст
     huggingface_api_key: Optional[str] = None  # HuggingFace для бесплатной транскрипции Whisper
     ai_model: str = "gpt-4-turbo"  # Default AI model (fallback)
     ai_temperature: float = 0.7

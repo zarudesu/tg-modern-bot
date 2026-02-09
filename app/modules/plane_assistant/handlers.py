@@ -202,12 +202,12 @@ def _classify_query(msg: str) -> str:
 def _get_provider_order(query_type: str) -> list:
     """Get provider priority based on query complexity.
 
-    Analysis queries → Groq (70B, smart) first.
-    Simple actions → OpenRouter (fast, free) first, Groq fallback.
+    Analysis queries → Groq (70B, smart) first, then Gemini, then OpenRouter.
+    Simple actions → OpenRouter (fast, free) first, Gemini, then Groq.
     """
     if query_type == "action":
-        return ["openrouter", "groq"]
-    return ["groq", "openrouter"]
+        return ["openrouter", "gemini", "groq"]
+    return ["groq", "gemini", "openrouter"]
 
 
 async def _ai_chat(user_message: str, system_prompt: str) -> str:

@@ -80,7 +80,21 @@ async def on_startup(bot: Bot):
             bot_logger.info("✅ Groq provider registered (llama-3.3-70b)")
             ai_initialized = True
 
-        # 2. OpenRouter — fallback, бесплатные модели, работает из РФ
+        # 2. Gemini — большой контекст (1M), бесплатный tier
+        gemini_key = getattr(settings, 'gemini_api_key', None)
+        if gemini_key:
+            ai_manager.create_gemini_provider(
+                api_key=gemini_key,
+                model="gemini-2.0-flash",
+                name="gemini",
+                set_as_default=False,
+                temperature=0.7,
+                max_tokens=2000
+            )
+            bot_logger.info("✅ Gemini provider registered (gemini-2.0-flash)")
+            ai_initialized = True
+
+        # 3. OpenRouter — fallback, бесплатные модели, работает из РФ
         if openrouter_key:
             ai_manager.create_openrouter_provider(
                 api_key=openrouter_key,
