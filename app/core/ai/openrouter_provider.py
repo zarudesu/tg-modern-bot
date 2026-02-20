@@ -26,10 +26,10 @@ FREE_MODELS = [
 
 # Рекомендуемые модели по задачам
 RECOMMENDED_MODELS = {
-    "chat": "meta-llama/llama-3.1-8b-instruct:free",  # Хороший баланс
-    "task_detection": "mistralai/mistral-7b-instruct:free",  # Быстрый
-    "report_generation": "google/gemma-2-9b-it:free",  # Качественный текст
-    "code": "qwen/qwen-2-7b-instruct:free",  # Хорош для кода
+    "chat": "meta-llama/llama-3.3-70b-instruct:free",  # Хороший баланс
+    "task_detection": "mistralai/mistral-small-3.1-24b-instruct:free",  # Быстрый
+    "report_generation": "google/gemma-3-27b-it:free",  # Качественный текст
+    "code": "qwen/qwen3-coder:free",  # Хорош для кода
 }
 
 
