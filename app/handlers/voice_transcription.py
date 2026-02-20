@@ -209,7 +209,7 @@ Rules:
 - Set company_unmatched=true or add to workers_unmatched if not matched"""
 
             payload = {
-                "model": "mistralai/devstral-2512:free",
+                "model": "google/gemma-3-27b-it:free",
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Extract from: {transcription}"}
